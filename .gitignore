@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.npm-cache/
+
+*.log
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+Thumbs.db
+
+vite.config.js
+vite.config.d.ts
