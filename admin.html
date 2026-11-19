@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0d1d33">
+  <title>ML Work | Přehled firmy</title>
+    <link rel="stylesheet" href="./admin-ui.css?v=20261119-duplicates">
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar" id="sidebar">
+      <a class="logo brand-logo" href="#overview" aria-label="ML Work – přehled"><img src="./logo.svg" alt="">ML <span>Work</span></a>
+      <div class="workspace"><span class="workspace-mark"><img src="./logo.svg" alt=""></span><span><b>ML Work</b><small>Správa firmy</small></span></div>
+      <p class="nav-label">PRACOVNÍ PROSTOR</p>
+      <nav class="nav" aria-label="Hlavní navigace">
+        <a href="#overview" data-page="overview"><span class="nav-dot"></span>Přehled</a>
+        <a href="#projects" data-page="projects"><span class="nav-dot"></span>Zakázky <span class="nav-count" id="nav-project-count">0</span></a>
+        <a href="#attendance" data-page="attendance"><span class="nav-dot"></span>Docházka</a>
+        <a href="#materials" data-page="materials"><span class="nav-dot"></span>Sklad materiálu <span class="nav-count" id="nav-low-stock">0</span></a>
+        <a href="#deliveries" data-page="deliveries"><span class="nav-dot"></span>Dodací listy</a>
+        <a href="#invoices" data-page="invoices"><span class="nav-dot"></span>Fakturace</a>
+      </nav>
+      <p class="nav-label nav-label--admin">SPRÁVA</p>
+      <nav class="nav" aria-label="Správa aplikace">
+        <a href="#users" data-page="users"><span class="nav-dot"></span>Uživatelé</a>
+        <a href="#activity" data-page="activity"><span class="nav-dot"></span>Aktivita</a>
+        <a href="#settings" data-page="settings"><span class="nav-dot"></span>Nastavení</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="photo-note"><b>ML Work</b><span>Práce na stavbách přehledně</span></div>
+        <div class="profile"><span class="avatar" id="current-user-initials">ML</span><span><b id="current-user-name">Správce ML Work</b><small id="current-user-role">Administrátor · ukázkový režim</small></span><button id="profile-menu" aria-label="Odhlásit se">Odhlásit</button></div>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-toggle" id="menu-toggle" aria-label="Otevřít navigaci">☰</button>
+        <div class="breadcrumbs"><span>ML Work</span><span>/</span><b id="breadcrumb-current">Přehled</b></div>
+        <div class="top-actions"><span class="today" id="today-label"></span><button class="icon-button" id="notification-button">Oznámení<i></i></button><span class="avatar avatar--small" id="top-user-initials">ML</span></div>
+      </header>
+      <div class="content" id="page-content" aria-live="polite"></div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog id="app-modal" class="app-modal"><form id="modal-form" method="dialog"><div id="modal-content"></div></form></dialog>
+  <script src="./auth-client.js"></script>
+  <script src="./admin-app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0d1d33">
+  <title>Moje práce | ML Work</title><link rel="stylesheet" href="./auth-pages.css?v=20261119-logo-upload">
+  <style>
+    .employee-page{width:min(100%,980px)}.employee-card{padding:32px}.employee-top{display:flex;justify-content:space-between;align-items:center;gap:16px}.employee-role{display:inline-flex;padding:7px 11px;border-radius:999px;color:#5d4a00;background:#fff4bc;font-size:11px;font-weight:700}.employee-tabs{display:flex;gap:8px;margin:24px 0 20px;border-bottom:1px solid #dfe4eb}.employee-tabs button{padding:12px 15px;border:0;border-bottom:3px solid transparent;background:transparent;color:#68778e;font-weight:700;cursor:pointer}.employee-tabs button.active{color:#17243a;border-color:#f5ca28}.employee-view[hidden],#project-picker[hidden]{display:none}.clock-panel{padding:22px;border:1px solid #e0e5ec;border-radius:12px;background:#fff}.clock-actions{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}.clock-button{min-height:92px;border:0;border-radius:12px;background:#ffd631;color:#17243a;font-size:19px;font-weight:800;cursor:pointer}.clock-button--out{background:#15243a;color:#fff}.clock-button:disabled{opacity:.45;cursor:not-allowed}.shift-state{margin-top:17px;padding:14px;border-radius:9px;background:#f3f6f9;color:#51627c;font-size:13px}.shift-state--active{background:#e8f5ed;color:#165b3b}.history-heading{margin:25px 0 12px;font-size:16px}.history-wrap{overflow:auto;border:1px solid #e2e7ed;border-radius:10px}.history{width:100%;border-collapse:collapse;min-width:650px}.history th,.history td{padding:13px 15px;border-bottom:1px solid #e8ebf0;text-align:left;font-size:12px}.history th{color:#76839a;font-size:10px;letter-spacing:.08em}.history tr:last-child td{border-bottom:0}.project-picker{display:flex;align-items:end;gap:12px;margin-top:18px;padding:16px;border:1px solid #ecd467;border-radius:10px;background:#fff9df}.project-picker .field{flex:1}.project-picker label{display:block;margin-bottom:6px;font-size:12px;font-weight:700}.project-picker select{width:100%;height:44px;padding:0 10px;border:1px solid #c9d1de;border-radius:7px;background:#fff;color:#17243a}.project-picker button{min-height:44px;padding:0 16px;border:0;border-radius:7px;background:#17243a;color:#fff;font-weight:700;cursor:pointer}.project-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.project-card{padding:18px;border:1px solid #e1e6ec;border-radius:11px;background:#fff}.project-card h2{margin:0 0 8px;font-size:16px}.project-card p{margin:5px 0;color:#68778e;font-size:12px}.project-status{display:inline-flex;margin-top:10px;padding:5px 9px;border-radius:20px;background:#eef2f6;color:#465875;font-size:11px;font-weight:700}.employee-message{min-height:20px;margin:12px 0 0;color:#9b362d;font-size:13px}.employee-message:empty{display:none}.employee-foot{margin-top:24px;color:#87909c;font-size:11px}.employee-signout{min-height:38px;padding:0 13px;border:1px solid #d9dee6;border-radius:7px;background:#fff;color:#1c2b41;font-weight:700;cursor:pointer}.empty-state{padding:28px 16px;text-align:center;color:#77849a;font-size:13px}@media(max-width:650px){.employee-card{padding:22px 17px}.employee-top{align-items:flex-start;flex-direction:column}.employee-tabs{gap:0}.employee-tabs button{padding:11px 9px;font-size:12px}.clock-actions,.project-grid{grid-template-columns:1fr}.clock-button{min-height:76px}.project-picker{align-items:stretch;flex-direction:column}.project-picker button{width:100%}}
+  </style>
+  <style>
+    .employee-message--success{color:#1f714d}
+    .employee-role{font-size:14px}.employee-tabs button{font-size:15px}.clock-button{font-size:24px}
+    .shift-state{font-size:16px}.history-heading{font-size:20px}.history th{font-size:13px}.history td{font-size:15px}
+    .project-picker label{font-size:15px}.project-picker select,.project-picker button{font-size:16px}
+    .project-card h2{font-size:20px}.project-card p{font-size:15px}.project-status{font-size:14px}
+    .employee-message{font-size:16px}.employee-foot{font-size:14px}.employee-signout{font-size:15px}.empty-state{font-size:15px}
+  </style>
+</head>
+<body>
+  <main class="page"><section class="card employee-card employee-page">
+    <header class="employee-top"><a class="logo brand-logo" href="./zamestnanec.html"><img src="./logo.svg" alt="">ML <span>Work</span></a><div><span class="employee-role" id="role-label">Zaměstnanec</span> <button class="employee-signout" id="sign-out" type="button">Odhlásit se</button></div></header>
+    <h1 id="employee-title">Moje práce</h1><p class="intro" id="employee-intro">Načítám vaše zakázky a docházku…</p>
+    <nav class="employee-tabs" aria-label="Moje práce"><button type="button" class="active" data-view="attendance">Moje docházka</button><button type="button" data-view="projects">Moje zakázky</button></nav>
+    <section class="employee-view" id="attendance-view"></section>
+    <section class="employee-view" id="projects-view" hidden></section>
+    <p class="employee-message" id="employee-message" role="status" aria-live="polite"></p>
+    <p class="employee-foot">ML Work · Docházka se ukládá do firemní databáze.</p>
+  </section></main>
+  <script src="./auth-client.js?v=20261119-employee"></script>
+  <script src="./employee-app.js?v=20261119-employee" defer></script>
+</body>
+</html>
