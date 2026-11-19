@@ -423,6 +423,28 @@ async function extractPdfText(buffer){
     return lines.join('\n').slice(0,12000);
   }finally{try{await (pdf?pdf.destroy():loadingTask.destroy());}catch{}}
 }
+function persistIncomingReceipt(receipt,activityText){
+  database.exec('BEGIN IMMEDIATE');
+  try{
+    const saved=database.prepare("SELECT payload,revision FROM app_state WHERE state_key='main'").get();
+    if(!saved?.payload){database.exec('ROLLBACK');return false;}
+    const state=JSON.parse(saved.payload);
+    for(const key of ['projects','materials','deliveries','invoices','attendance','requests','activity','movements','incomingReceipts'])if(!Array.isArray(state[key]))state[key]=[];
+    if(receipt.sourceKey&&state.incomingReceipts.some(item=>item.sourceKey===receipt.sourceKey)){database.exec('ROLLBACK');return false;}
+    receipt.duplicateOf=receiptDuplicateOf(state.incomingReceipts,receipt)||receipt.duplicateOf||'';
+    state.incomingReceipts.unshift(receipt);
+    state.activity.unshift({date:receipt.date,text:activityText||`Nový příjmový doklad ${receipt.documentNumber||receipt.id} čeká na kontrolu.`,'kind':'Příjem materiálu'});
+    state.activity=state.activity.slice(0,80);
+    writeBusinessTables(state,null);
+    const revision=Number(saved.revision||0)+1;
+    database.prepare("UPDATE app_state SET payload=?,revision=?,updated_by=NULL,updated_at=(CAST(strftime('%s','now') AS INTEGER)*1000) WHERE state_key='main'").run(JSON.stringify(state),revision);
+    database.exec('COMMIT');
+    return true;
+  }catch(error){
+    try{database.exec('ROLLBACK');}catch{}
+    throw error;
+  }
+}
 function receiptDuplicateOf(receipts,candidate){
   const hashes=new Set([candidate.fileHash,...(candidate.attachments||[]).map(item=>item.sha256)].filter(Boolean));
   const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');

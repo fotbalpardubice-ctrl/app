@@ -10,6 +10,8 @@ V přehledu zaměstnanců správce ukládá jméno, telefon, e-mail a výchozí 
 
 Ve skladu lze přes **Vyskladnit na zakázku** vytvořit jeden dodací list s libovolným počtem materiálových položek; každé množství se ověří a při uložení odečte. Odstranění dodacího listu smaže také jeho položky a vrátí množství do skladu. Pokud je k listu připojená faktura, správce odstranění faktury výslovně potvrdí.
 
+Příchozí doklady lze smazat včetně jejich příloh; u potvrzeného příjmu na sklad se odečte přijaté množství. Smazání materiálu odstraní položku úplně včetně jejího zůstatku, skladových pohybů a výskytů na příjmových a výdejních dokladech. Připojené faktury zůstanou v evidenci.
+
 ## Spuštění ve Windows
 
 1. Otevři PowerShell v této složce.

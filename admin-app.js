@@ -252,7 +252,7 @@
       const rows = state.materials.map(m=>`<tr data-search="${esc(`${m.id} ${m.name} ${m.category} ${m.location}`)}" data-status="${Number(m.stock)<=Number(m.min)?'Nízký stav':'V pořádku'}"><td><b>${esc(m.id)}</b></td><td><b>${esc(m.name)}</b><small class="cell-sub">${esc(m.category)} · ${esc(m.location)}</small></td><td>${esc(m.unit)}</td><td><b class="stock-qty ${Number(m.stock)<=Number(m.min)?'stock-qty--low':''}">${Number(m.stock)} ${esc(m.unit)}</b><small class="cell-sub">Min. ${Number(m.min)} ${esc(m.unit)}</small></td><td>${money(m.price)}</td><td>${statusPill(Number(m.stock)<=Number(m.min)?'Nízký stav':'V pořádku')}</td><td class="row-actions"><button class="text-button" data-action="stock-adjust" data-id="${esc(m.id)}">Pohyb</button><button class="text-button" data-action="edit-material" data-id="${esc(m.id)}">Upravit</button><button class="text-button text-button--danger" data-action="delete-material" data-id="${esc(m.id)}">Odstranit</button></td></tr>`).join('');
       const stockValue = state.materials.reduce((sum,m)=>sum+Number(m.stock)*Number(m.price),0);
       const pendingReceipts=state.incomingReceipts.filter(receipt=>receipt.status==='Čeká na kontrolu');
-      const receiptRows=[...state.incomingReceipts].filter(receipt=>receipt.status!=='Ignorováno').sort((a,b)=>(a.status==='Čeká na kontrolu'?-1:1)-(b.status==='Čeká na kontrolu'?-1:1)||String(b.date).localeCompare(String(a.date))).map(receipt=>{
+      const receiptRows=[...state.incomingReceipts].sort((a,b)=>(a.status==='Čeká na kontrolu'?0:a.status==='Potvrzeno'?1:2)-(b.status==='Čeká na kontrolu'?0:b.status==='Potvrzeno'?1:2)||String(b.date).localeCompare(String(a.date))).map(receipt=>{
         const duplicate=receipt.duplicateOf?state.incomingReceipts.find(item=>item.id===receipt.duplicateOf):null;
         return `<article class="incoming-receipt"><div><b>${esc(receipt.documentNumber||receipt.emailSubject||'Nový dodací list')}</b>${duplicate?`<span class="duplicate-warning">Možný duplikát dokladu ${esc(duplicate.documentNumber||duplicate.id)}</span>`:''}<small>${esc(receipt.supplier||receipt.emailFrom||'Ruční příjem')} · ${dateFmt(receipt.date)}${receipt.status==='Potvrzeno'?` · ${receipt.destination==='project'?`Zakázka ${esc(projectName(receipt.projectId))}`:'Zařazeno na sklad'}`:''}</small></div><div class="incoming-attachments">${(receipt.attachments||[]).map(file=>`<a href="./api/admin/incoming/${encodeURIComponent(receipt.id)}/attachments/${encodeURIComponent(file.id)}" target="_blank" rel="noopener">${esc(file.name)}</a>`).join(' ')}</div><div class="row-actions">${receipt.status==='Čeká na kontrolu'?`<button class="text-button" data-action="review-incoming-receipt" data-id="${esc(receipt.id)}">Zkontrolovat a zařadit</button><button class="text-button text-button--danger" data-action="ignore-incoming-receipt" data-id="${esc(receipt.id)}">Ignorovat</button>`:statusPill(receipt.status)}<button class="text-button text-button--danger" data-action="delete-incoming-receipt" data-id="${esc(receipt.id)}">Smazat</button></div></article>`;
       }).join('');
@@ -577,7 +577,7 @@
       case 'upload-incoming-file': chooseIncomingFile(); break;
       case 'review-incoming-receipt': openIncomingReceiptForm(recordId); break;
       case 'ignore-incoming-receipt': {
-        const receipt=state.incomingReceipts.find(item=>item.id===recordId);if(receipt&&confirm('Označit tento e-mail jako nesouvisející? Materiál se nezařadí do skladu.')){receipt.status='Ignorováno';log(`Příchozí doklad ${receipt.documentNumber||receipt.emailSubject||receipt.id} byl ignorován.`,'Příjem materiálu');render();}break;
+        const receipt=state.incomingReceipts.find(item=>item.id===recordId);if(receipt&&confirm('Označit tento doklad jako nesouvisející? Materiál se nezařadí do skladu.')){receipt.status='Ignorováno';log(`Příchozí doklad ${receipt.documentNumber||receipt.id} byl ignorován.`,'Příjem materiálu');render();}break;
       }
       case 'delete-incoming-receipt': {
         const receipt=state.incomingReceipts.find(item=>item.id===recordId);if(!receipt)break;
@@ -637,8 +637,18 @@
         if(confirm(`Opravdu odstranit zakázku ${recordId}?`)){state.projects=state.projects.filter(item=>item.id!==recordId);log(`Zakázka ${recordId} byla odstraněna.`,'Zakázky');render();notify('Zakázka byla odstraněna.');}break;
       }
       case 'delete-material': {
-        if(state.deliveries.some(delivery=>delivery.items.some(line=>line.materialId===recordId))||state.incomingReceipts.some(receipt=>receipt.items?.some(line=>line.materialId===recordId))){notify('Materiál nelze odstranit, protože je uveden na dodacím listu.');break;}
-        const item=material(recordId);if(item&&confirm(`Opravdu odstranit materiál ${item.name}?`)){state.materials=state.materials.filter(value=>value.id!==recordId);state.movements=state.movements.filter(value=>value.materialId!==recordId);log(`Materiál ${item.name} byl odstraněn ze skladu.`,'Sklad');render();notify('Materiál byl odstraněn.');}break;
+        const item=material(recordId);if(!item)break;
+        const deliveryLines=state.deliveries.reduce((count,delivery)=>count+(delivery.items||[]).filter(line=>line.materialId===recordId).length,0);
+        const receiptLines=state.incomingReceipts.reduce((count,receipt)=>count+(receipt.items||[]).filter(line=>line.materialId===recordId).length,0);
+        const movementCount=state.movements.filter(movement=>movement.materialId===recordId).length;
+        const details=` Smazán bude také skladový zůstatek ${Number(item.stock)} ${item.unit}, ${deliveryLines} položek z výdejních dokladů, ${receiptLines} položek z příjmových dokladů a ${movementCount} skladových pohybů. Vystavené faktury zůstanou zachovány.`;
+        if(confirm(`Úplně odstranit materiál „${item.name}“ ze skladu?${details}`)){
+          for(const delivery of state.deliveries)delivery.items=(delivery.items||[]).filter(line=>line.materialId!==recordId);
+          for(const receipt of state.incomingReceipts)receipt.items=(receipt.items||[]).filter(line=>line.materialId!==recordId);
+          state.materials=state.materials.filter(value=>value.id!==recordId);
+          state.movements=state.movements.filter(movement=>movement.materialId!==recordId);
+          log(`Materiál ${item.name} byl úplně odstraněn ze skladu a souvisejících dokladů.`,'Sklad');render();notify('Materiál a jeho skladová historie byly úplně odstraněny.');
+        }break;
       }
       case 'delete-attendance': {
         const item=state.attendance.find(value=>value.id===recordId);if(item&&confirm(`Odstranit docházku ${item.employee} z ${dateFmt(item.date)}?`)){state.attendance=state.attendance.filter(value=>value.id!==recordId);log(`Docházkový záznam ${item.id} byl odstraněn.`,'Docházka');render();notify('Docházkový záznam byl odstraněn.');}break;
