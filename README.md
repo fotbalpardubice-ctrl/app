@@ -6,6 +6,8 @@ Prohlížeč komunikuje pouze s Node.js serverem přes HTTPS. Přihlašovací ú
 
 Uživatelské účty zakládá správce ručně na stránce Uživatelé; veřejná žádost o přístup ani registrace nejsou zapnuté. Na stránkách zakázek, docházky, skladu, dodacích listů, fakturace, uživatelů a aktivity jsou importy a exporty CSV. CSV soubory používají české záhlaví, oddělovač čárkou nebo středníkem a u uživatelů je pro import potřeba sloupec s heslem alespoň 8 znaků. Účty jsou uloženy jako zabezpečené otisky hesel.
 
+Ve skladu lze přes **Vyskladnit na zakázku** vytvořit jeden dodací list s libovolným počtem materiálových položek; každé množství se ověří a při uložení odečte. Odstranění dodacího listu smaže také jeho položky a vrátí množství do skladu. Pokud je k listu připojená faktura, správce odstranění faktury výslovně potvrdí.
+
 ## Spuštění ve Windows
 
 1. Otevři PowerShell v této složce.
