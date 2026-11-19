@@ -22,6 +22,9 @@ if(!appUserColumns.some(column=>column.name==='hourly_rate'))
 const projectAssignmentColumns=database.prepare('PRAGMA table_info(project_assignments)').all();
 if(!projectAssignmentColumns.some(column=>column.name==='hourly_rate'))
   database.exec('ALTER TABLE project_assignments ADD COLUMN hourly_rate REAL NOT NULL DEFAULT 0 CHECK (hourly_rate >= 0)');
+const materialColumns=database.prepare('PRAGMA table_info(materials)').all();
+if(!materialColumns.some(column=>column.name==='purchase_unit_price'))
+  database.exec('ALTER TABLE materials ADD COLUMN purchase_unit_price REAL NOT NULL DEFAULT 0 CHECK (purchase_unit_price >= 0)');
 
 function normalizeParameter(value){
   if(value instanceof Date)return value.getTime();

@@ -152,11 +152,21 @@ function writeBusinessTables(state,actorId){
     for(const userId of Array.isArray(item.assignedUsers)?new Set(item.assignedUsers):[])
       if(validUserIds.has(userId))insertAssignment.run(safeText(item.id),userId,Math.max(0,safeNumber(projectRates[userId],safeNumber(userById.get(userId)?.hourly_rate))),actorId);
   }
-  const insertMaterial=database.prepare(`INSERT INTO materials(id,name,category,unit,stock,minimum_stock,unit_price,location)
-    VALUES(?,?,?,?,?,?,?,?)`);
+  const receiptPurchasePrices=new Map();
+  for(const receipt of Array.isArray(state.incomingReceipts)?state.incomingReceipts:[]){
+    if(receipt.status!=='Potvrzeno'||receipt.destination!=='warehouse')continue;
+    for(const line of Array.isArray(receipt.items)?receipt.items:[]){
+      const purchasePrice=safeNumber(line.purchasePrice);
+      const prior=receiptPurchasePrices.get(line.materialId);
+      if(line.materialId&&purchasePrice>0&&(!prior||String(receipt.date||'')>prior.date))receiptPurchasePrices.set(line.materialId,{price:purchasePrice,date:String(receipt.date||'')});
+    }
+  }
+  const insertMaterial=database.prepare(`INSERT INTO materials(id,name,category,unit,stock,minimum_stock,unit_price,purchase_unit_price,location)
+    VALUES(?,?,?,?,?,?,?,?,?)`);
   for(const item of state.materials){
+    const purchasePrice=Object.hasOwn(item,'purchasePrice')?safeNumber(item.purchasePrice):safeNumber(receiptPurchasePrices.get(item.id)?.price);
     insertMaterial.run(safeText(item.id),safeText(item.name),safeText(item.category,'Ostatní'),safeText(item.unit,'ks'),
-      Math.max(0,safeNumber(item.stock)),Math.max(0,safeNumber(item.min)),Math.max(0,safeNumber(item.price)),safeText(item.location));
+      Math.max(0,safeNumber(item.stock)),Math.max(0,safeNumber(item.min)),Math.max(0,safeNumber(item.price)),Math.max(0,purchasePrice),safeText(item.location));
   }
 
   const insertDelivery=database.prepare(`INSERT INTO delivery_notes(id,project_id,delivery_date,issued_by,received_by,note,status)

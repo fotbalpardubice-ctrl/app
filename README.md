@@ -25,6 +25,8 @@ Soubor `.env` obsahuje lokální cestu k SQLite, údaje správce a PFX pro HTTPS
 
 Automatické propojení s e-mailovou schránkou je vypnuté. Ve skladu lze ručně nahrát fakturu nebo dodací list ve formátu PDF, CSV či obrázku. Z CSV a textových PDF se aplikace pokusí předvyplnit údaje a položky; obrázky a naskenovaná PDF je třeba zkontrolovat a položky doplnit ručně. Nahrané doklady zůstanou ve frontě ke kontrole a do zásob se promítnou až po potvrzení správcem. Před potvrzením správce vybere centrální sklad či konkrétní zakázku. U přímého příjmu na zakázku se centrální sklad nezvýší.
 
+Při příjmu na sklad se nákupní cena za jednotku uloží na skladovou kartu a zobrazí odděleně od prodejní ceny používané pro faktury.
+
 Příchozí doklady se označí jako možné duplicity při shodě obsahu souboru nebo dodavatele a čísla dokladu. Čekající doklad lze smazat bez změny zásob. U potvrzeného příjmu na sklad se při smazání množství odečte zpět; pokud už bylo vydáno, aplikace smazání odmítne, aby sklad nespadl do nesouladu.
 
 ## Předloha faktury

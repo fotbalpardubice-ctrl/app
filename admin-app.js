@@ -125,10 +125,21 @@
   function mapDatabaseUser(user) {
     return {id:user.id,name:user.full_name,email:user.email,phone:user.phone||'',hourlyRate:Number(user.hourly_rate)||0,role:window.MLAuth.displayRole(user),status:user.is_active?'Aktivní':'Pozastaveno',is_active:user.is_active};
   }
+  function restorePurchasePrices(snapshot){
+    const byId=new Map((snapshot.materials||[]).map(item=>[item.id,item]));
+    for(const receipt of snapshot.incomingReceipts||[]){
+      if(receipt.status!=='Potvrzeno'||receipt.destination!=='warehouse')continue;
+      for(const line of receipt.items||[]){
+        const item=byId.get(line.materialId),price=Number(line.purchasePrice);
+        if(item&&Number.isFinite(price)&&price>0&&!(Number(item.purchasePrice)>0))item.purchasePrice=price;
+      }
+    }
+  }
   async function loadDatabaseState() {
     const remote=await window.MLAuth.adminState();
     if(remote.state&&typeof remote.state==='object')state={...demo,...remote.state};
     else state=loadState();
+    restorePurchasePrices(state);
     state.users=(remote.users||[]).map(mapDatabaseUser);
     databaseRevision=remote.revision||0;
     if(!remote.state){
@@ -149,6 +160,7 @@
       let changed=false;
       if(Number(remote.revision||0)>databaseRevision){
         if(remote.state&&typeof remote.state==='object')state={...demo,...remote.state};
+        restorePurchasePrices(state);
         state.users=(remote.users||[]).map(mapDatabaseUser);
         databaseRevision=Number(remote.revision||0);
         try{localStorage.setItem(storageKey,JSON.stringify(state));}catch(_){/* The database remains the primary store. */}
@@ -163,7 +175,7 @@
   function log(text, kind='Změna') {
     state.activity.unshift({date:new Date().toISOString().slice(0,10),text,kind});
     state.activity = state.activity.slice(0,80);
-    save();
+    return save();
   }
   function notify(text) {
     const el = $('#toast');
@@ -249,7 +261,7 @@
         <section class="panel page-panel"><div class="panel-heading"><div><h2>Seznam zakázek</h2><p>Otevřete detail, materiál i přiřazené pracovníky.</p></div></div>${searchTools('Hledat zakázku, zákazníka nebo adresu',statusFilter(['Probíhá','Čeká na zahájení','Dokončeno']))}<div class="table-wrap"><table><thead><tr><th>ČÍSLO</th><th>NÁZEV / MÍSTO</th><th>ZÁKAZNÍK</th><th>ODPOVĚDNÝ</th><th>PŘIŘAZENÍ PRACOVNÍCI</th><th>TERMÍN</th><th>STAV</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty-cell">Žádné zakázky.</td></tr>'}</tbody></table></div></section>`;
     },
     materials() {
-      const rows = state.materials.map(m=>`<tr data-search="${esc(`${m.id} ${m.name} ${m.category} ${m.location}`)}" data-status="${Number(m.stock)<=Number(m.min)?'Nízký stav':'V pořádku'}"><td><b>${esc(m.id)}</b></td><td><b>${esc(m.name)}</b><small class="cell-sub">${esc(m.category)} · ${esc(m.location)}</small></td><td>${esc(m.unit)}</td><td><b class="stock-qty ${Number(m.stock)<=Number(m.min)?'stock-qty--low':''}">${Number(m.stock)} ${esc(m.unit)}</b><small class="cell-sub">Min. ${Number(m.min)} ${esc(m.unit)}</small></td><td>${money(m.price)}</td><td>${statusPill(Number(m.stock)<=Number(m.min)?'Nízký stav':'V pořádku')}</td><td class="row-actions"><button class="text-button" data-action="stock-adjust" data-id="${esc(m.id)}">Pohyb</button><button class="text-button" data-action="edit-material" data-id="${esc(m.id)}">Upravit</button><button class="text-button text-button--danger" data-action="delete-material" data-id="${esc(m.id)}">Odstranit</button></td></tr>`).join('');
+      const rows = state.materials.map(m=>`<tr data-search="${esc(`${m.id} ${m.name} ${m.category} ${m.location}`)}" data-status="${Number(m.stock)<=Number(m.min)?'Nízký stav':'V pořádku'}"><td><b>${esc(m.id)}</b></td><td><b>${esc(m.name)}</b><small class="cell-sub">${esc(m.category)} · ${esc(m.location)}</small></td><td>${esc(m.unit)}</td><td><b class="stock-qty ${Number(m.stock)<=Number(m.min)?'stock-qty--low':''}">${Number(m.stock)} ${esc(m.unit)}</b><small class="cell-sub">Min. ${Number(m.min)} ${esc(m.unit)}</small></td><td>${Number(m.purchasePrice)>0?money(m.purchasePrice):'—'}</td><td>${money(m.price)}</td><td>${statusPill(Number(m.stock)<=Number(m.min)?'Nízký stav':'V pořádku')}</td><td class="row-actions"><button class="text-button" data-action="stock-adjust" data-id="${esc(m.id)}">Pohyb</button><button class="text-button" data-action="edit-material" data-id="${esc(m.id)}">Upravit</button><button class="text-button text-button--danger" data-action="delete-material" data-id="${esc(m.id)}">Odstranit</button></td></tr>`).join('');
       const stockValue = state.materials.reduce((sum,m)=>sum+Number(m.stock)*Number(m.price),0);
       const pendingReceipts=state.incomingReceipts.filter(receipt=>receipt.status==='Čeká na kontrolu');
       const receiptRows=[...state.incomingReceipts].sort((a,b)=>(a.status==='Čeká na kontrolu'?0:a.status==='Potvrzeno'?1:2)-(b.status==='Čeká na kontrolu'?0:b.status==='Potvrzeno'?1:2)||String(b.date).localeCompare(String(a.date))).map(receipt=>{
@@ -257,9 +269,9 @@
         return `<article class="incoming-receipt"><div><b>${esc(receipt.documentNumber||receipt.emailSubject||'Nový dodací list')}</b>${duplicate?`<span class="duplicate-warning">Možný duplikát dokladu ${esc(duplicate.documentNumber||duplicate.id)}</span>`:''}<small>${esc(receipt.supplier||receipt.emailFrom||'Ruční příjem')} · ${dateFmt(receipt.date)}${receipt.status==='Potvrzeno'?` · ${receipt.destination==='project'?`Zakázka ${esc(projectName(receipt.projectId))}`:'Zařazeno na sklad'}`:''}</small></div><div class="incoming-attachments">${(receipt.attachments||[]).map(file=>`<a href="./api/admin/incoming/${encodeURIComponent(receipt.id)}/attachments/${encodeURIComponent(file.id)}" target="_blank" rel="noopener">${esc(file.name)}</a>`).join(' ')}</div><div class="row-actions">${receipt.status==='Čeká na kontrolu'?`<button class="text-button" data-action="review-incoming-receipt" data-id="${esc(receipt.id)}">Zkontrolovat a zařadit</button><button class="text-button text-button--danger" data-action="ignore-incoming-receipt" data-id="${esc(receipt.id)}">Ignorovat</button>`:statusPill(receipt.status)}<button class="text-button text-button--danger" data-action="delete-incoming-receipt" data-id="${esc(receipt.id)}">Smazat</button></div></article>`;
       }).join('');
       return `${pageHeader('Sklad materiálu','Katalog, skladové zásoby a výdeje materiálu na jednotlivé zakázky.',`<div class="header-actions">${button('Vyskladnit na zakázku','new-stock-delivery')}${button('＋ Nahrát fakturu / dodací list', 'upload-incoming-file',incomingUploadRunning?'disabled':'')}${button('＋ Nová položka','new-material')} ${button('Pohyb skladu','stock-adjust')}${csvTools('materials')}</div>`)}
-        <div class="stats stats--compact"><div class="stat"><span class="stat-top">Položek v katalogu</span><b class="stat-value">${state.materials.length}</b></div><div class="stat"><span class="stat-top">Položek pod limitem</span><b class="stat-value">${lowStock().length}</b></div><div class="stat"><span class="stat-top">Odhadovaná hodnota skladu</span><b class="stat-value stat-value--money">${money(stockValue)}</b></div><div class="stat"><span class="stat-top">Výdej se eviduje přes</span><b class="stat-value stat-value--word">Dodací list</b></div></div>
+        <div class="stats stats--compact"><div class="stat"><span class="stat-top">Položek v katalogu</span><b class="stat-value">${state.materials.length}</b></div><div class="stat"><span class="stat-top">Položek pod limitem</span><b class="stat-value">${lowStock().length}</b></div><div class="stat"><span class="stat-top">Prodejní hodnota skladu</span><b class="stat-value stat-value--money">${money(stockValue)}</b></div><div class="stat"><span class="stat-top">Výdej se eviduje přes</span><b class="stat-value stat-value--word">Dodací list</b></div></div>
         <section class="panel page-panel"><div class="panel-heading"><div><h2>Příchozí doklady</h2><p>${pendingReceipts.length} čekají na kontrolu · nejdřív vyberte sklad nebo konkrétní zakázku.</p></div><div class="header-actions">${button('＋ Zadat příjem','new-incoming-receipt')}</div></div><p class="muted">Dodací listy a faktury přidejte ručně nebo je nahrajte jako soubor.</p><div class="incoming-list">${receiptRows||'<p class="muted">Zatím tu nejsou žádné příchozí doklady.</p>'}</div></section>
-        <section class="panel page-panel"><div class="panel-heading"><div><h2>Stav skladu</h2><p>Výdej na zakázku vytvoří dodací list a sníží dostupné množství.</p></div></div>${searchTools('Hledat kód, materiál nebo kategorii',statusFilter(['Nízký stav','V pořádku']))}<div class="table-wrap"><table><thead><tr><th>KÓD</th><th>MATERIÁL</th><th>JEDNOTKA</th><th>SKLADEM</th><th>CENA / JEDN.</th><th>STAV</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty-cell">Katalog materiálu je prázdný.</td></tr>'}</tbody></table></div></section>`;
+        <section class="panel page-panel"><div class="panel-heading"><div><h2>Stav skladu</h2><p>Výdej na zakázku vytvoří dodací list a sníží dostupné množství.</p></div></div>${searchTools('Hledat kód, materiál nebo kategorii',statusFilter(['Nízký stav','V pořádku']))}<div class="table-wrap"><table><thead><tr><th>KÓD</th><th>MATERIÁL</th><th>JEDNOTKA</th><th>SKLADEM</th><th>NÁKUPNÍ CENA / JEDN.</th><th>PRODEJNÍ CENA / JEDN.</th><th>STAV</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty-cell">Katalog materiálu je prázdný.</td></tr>'}</tbody></table></div></section>`;
     },
     deliveries() {
       const rows = state.deliveries.map(d=>`<tr data-search="${esc(`${d.id} ${projectName(d.projectId)} ${d.person} ${d.note}`)}" data-status="${d.billed?'Vyúčtováno':'K vyúčtování'}"><td><b>${esc(d.id)}</b><small class="cell-sub">${esc(d.person)}</small></td><td>${dateFmt(d.date)}</td><td><button class="text-button text-button--project" data-action="project-detail" data-id="${esc(d.projectId)}">${esc(d.projectId)} · ${esc(projectName(d.projectId))}</button></td><td>${d.items.map(i=>`<span class="item-line">${esc(materialName(i.materialId))} <b>${Number(i.qty)} ${esc(material(i.materialId)?.unit||'')}</b></span>`).join('')}</td><td>${statusPill(d.billed?'Vyúčtováno':'K vyúčtování')}</td><td class="row-actions"><button class="text-button" data-action="print-delivery" data-id="${esc(d.id)}">Tisk</button>${d.billed?'':`<button class="text-button" data-action="edit-delivery" data-id="${esc(d.id)}">Upravit</button><button class="text-button" data-action="invoice-delivery" data-id="${esc(d.id)}">Fakturovat</button>`}<button class="text-button text-button--danger" data-action="delete-delivery" data-id="${esc(d.id)}">Odstranit</button></td></tr>`).join('');
@@ -323,8 +335,8 @@
     openModal(projectId?'Upravit zakázku':'Nová zakázka',body,projectId?'Uložit změny':'Vytvořit zakázku','save-project');
   }
   function openMaterialForm(materialId='') {
-    const item=material(materialId)||{name:'',category:'',unit:'ks',stock:0,min:0,price:0,location:'Regál'};
-    const body = `<input type="hidden" name="recordId" value="${esc(materialId)}"><div class="form-grid">${field('Název materiálu','name',item.name)}${field('Kategorie','category',item.category)}${field('Jednotka (ks, m, bal)','unit',item.unit)}${field('Skladem','stock',item.stock,'number',true,'min="0" step="0.01"')}${field('Minimální zásoba','min',item.min,'number',true,'min="0" step="0.01"')}${field('Cena za jednotku (Kč)','price',item.price,'number',true,'min="0" step="0.01"')}${field('Umístění ve skladu','location',item.location)}</div>`;
+    const item=material(materialId)||{name:'',category:'',unit:'ks',stock:0,min:0,purchasePrice:0,price:0,location:'Regál'};
+    const body = `<input type="hidden" name="recordId" value="${esc(materialId)}"><div class="form-grid">${field('Název materiálu','name',item.name)}${field('Kategorie','category',item.category)}${field('Jednotka (ks, m, bal)','unit',item.unit)}${field('Skladem','stock',item.stock,'number',true,'min="0" step="0.01"')}${field('Minimální zásoba','min',item.min,'number',true,'min="0" step="0.01"')}${field('Nákupní cena za jednotku (Kč)','purchasePrice',item.purchasePrice||0,'number',true,'min="0" step="0.01"')}${field('Prodejní cena za jednotku (Kč)','price',item.price,'number',true,'min="0" step="0.01"')}${field('Umístění ve skladu','location',item.location)}</div>`;
     openModal(materialId?'Upravit materiál':'Nová položka skladu',body,materialId?'Uložit změny':'Přidat do skladu','save-material');
   }
   function openStockForm(materialId='') {
@@ -345,7 +357,7 @@
   }
   function incomingReceiptLine(item={}){
     const selected=material(item.materialId);
-    return `<div class="incoming-item-row"><label class="form-field"><span>Existující materiál (volitelné)</span><select name="materialId"><option value="">Nová položka nebo doplnění názvu</option>${state.materials.map(m=>`<option value="${esc(m.id)}" ${m.id===item.materialId?'selected':''}>${esc(m.id)} · ${esc(m.name)} (${esc(m.unit)})</option>`).join('')}</select></label><label class="form-field"><span>Název materiálu</span><input name="name" value="${esc(item.name||selected?.name||'')}" required></label><label class="form-field"><span>Kategorie</span><input name="category" value="${esc(item.category||selected?.category||'Přijaté dodávky')}"></label><label class="form-field"><span>Jednotka</span><input name="unit" value="${esc(item.unit||selected?.unit||'ks')}" required></label><label class="form-field"><span>Množství</span><input name="qty" type="number" min="0.01" step="0.01" value="${esc(item.qty??1)}" required></label><label class="form-field"><span>Nákupní cena / jednotku</span><input name="purchasePrice" type="number" min="0" step="0.01" value="${esc(item.purchasePrice??0)}"></label><button class="remove-line" type="button" data-action="remove-receipt-line" aria-label="Odebrat položku">×</button></div>`;
+    return `<div class="incoming-item-row"><label class="form-field"><span>Existující materiál (volitelné)</span><select name="materialId"><option value="">Nová položka nebo doplnění názvu</option>${state.materials.map(m=>`<option value="${esc(m.id)}" ${m.id===item.materialId?'selected':''}>${esc(m.id)} · ${esc(m.name)} (${esc(m.unit)})</option>`).join('')}</select></label><label class="form-field"><span>Název materiálu</span><input name="name" value="${esc(item.name||selected?.name||'')}" required></label><label class="form-field"><span>Kategorie</span><input name="category" value="${esc(item.category||selected?.category||'Přijaté dodávky')}"></label><label class="form-field"><span>Jednotka</span><input name="unit" value="${esc(item.unit||selected?.unit||'ks')}" required></label><label class="form-field"><span>Množství</span><input name="qty" type="number" min="0.01" step="0.01" value="${esc(item.qty??1)}" required></label><label class="form-field"><span>Nákupní cena / jednotku</span><input name="purchasePrice" type="number" min="0" step="0.01" value="${esc(item.purchasePrice??selected?.purchasePrice??0)}"></label><button class="remove-line" type="button" data-action="remove-receipt-line" aria-label="Odebrat položku">×</button></div>`;
   }
   function openIncomingReceiptForm(receiptId=''){
     const existing=state.incomingReceipts.find(item=>item.id===receiptId);
@@ -355,7 +367,7 @@
     const attachmentLinks=(item.attachments||[]).map(file=>`<a href="./api/admin/incoming/${encodeURIComponent(item.id)}/attachments/${encodeURIComponent(file.id)}" target="_blank" rel="noopener">${esc(file.name)}</a>`).join(' · ');
     const duplicate=item.duplicateOf?state.incomingReceipts.find(receipt=>receipt.id===item.duplicateOf):null;
     const sourceInfo=item.source==='email'?`<div class="mail-source"><b>E-mail:</b> ${esc(item.emailFrom||'Neznámý odesílatel')} · ${esc(item.emailSubject||'Bez předmětu')}${attachmentLinks?`<br><b>Přílohy:</b> ${attachmentLinks}`:''}<p>${esc(item.extractionSummary||'Příjem zatím není zaúčtovaný. Před potvrzením doplňte položky a vyberte cíl.')}</p>${item.extractedText?`<details><summary>Zobrazit rozpoznaný text</summary><pre class="extracted-document-text">${esc(item.extractedText)}</pre></details>`:''}</div>`:item.source==='upload'?`<div class="mail-source"><b>Nahraný dokument:</b> ${attachmentLinks||esc(item.attachments?.[0]?.name||'soubor')}<p>${esc(item.extractionSummary||'Před zařazením doplňte a zkontrolujte položky.')}</p>${item.extractedText?`<details><summary>Zobrazit rozpoznaný text</summary><pre class="extracted-document-text">${esc(item.extractedText)}</pre></details>`:''}</div>`:'<p class="form-hint">Příjem se zatím nepropíše do zásoby. Nejdřív doplňte položky a vyberte, kam materiál zařadit.</p>';
-    const body=`<input type="hidden" name="receiptId" value="${esc(item.id)}">${duplicate?`<div class="duplicate-notice">Tento doklad se podobá příjmu ${esc(duplicate.documentNumber||duplicate.id)}. Ověřte, že nejde o duplicitní zápis.</div>`:''}<div class="form-grid">${field('Dodavatel','supplier',item.supplier,'text',false)}${field('Číslo dodacího listu','documentNumber',item.documentNumber,'text',false)}${field('Datum dodání','date',item.date||day,'date')}${selectField('Zařadit materiál do','destination',[['warehouse','Sklad'],['project','Konkrétní zakázka']],item.destination==='project'?'project':'warehouse')}<label class="form-field"><span>Zakázka při přímé dodávce</span><select name="projectId"><option value="">Vyberte zakázku</option>${state.projects.map(project=>`<option value="${esc(project.id)}" ${project.id===item.projectId?'selected':''}>${esc(project.id)} · ${esc(project.name)}</option>`).join('')}</select></label>${field('Poznámka','note',item.note,'text',false)}</div>${sourceInfo}<div class="form-section-heading"><b>Položky dodávky</b><button class="text-button" type="button" data-action="add-receipt-line">＋ Přidat položku</button></div><div id="incoming-receipt-lines">${lines}</div><p class="form-hint">Při zařazení na sklad se zvýší skladový stav. Při přímém přiřazení na zakázku se množství zaznamená u zakázky, ale nepřičte se do centrálního skladu. Nákupní cena nepřepíše prodejní cenu v katalogu.</p>`;
+    const body=`<input type="hidden" name="receiptId" value="${esc(item.id)}">${duplicate?`<div class="duplicate-notice">Tento doklad se podobá příjmu ${esc(duplicate.documentNumber||duplicate.id)}. Ověřte, že nejde o duplicitní zápis.</div>`:''}<div class="form-grid">${field('Dodavatel','supplier',item.supplier,'text',false)}${field('Číslo dodacího listu','documentNumber',item.documentNumber,'text',false)}${field('Datum dodání','date',item.date||day,'date')}${selectField('Zařadit materiál do','destination',[['warehouse','Sklad'],['project','Konkrétní zakázka']],item.destination==='project'?'project':'warehouse')}<label class="form-field"><span>Zakázka při přímé dodávce</span><select name="projectId"><option value="">Vyberte zakázku</option>${state.projects.map(project=>`<option value="${esc(project.id)}" ${project.id===item.projectId?'selected':''}>${esc(project.id)} · ${esc(project.name)}</option>`).join('')}</select></label>${field('Poznámka','note',item.note,'text',false)}</div>${sourceInfo}<div class="form-section-heading"><b>Položky dodávky</b><button class="text-button" type="button" data-action="add-receipt-line">＋ Přidat položku</button></div><div id="incoming-receipt-lines">${lines}</div><p class="form-hint">Při zařazení na sklad se zvýší skladový stav. Při přímém přiřazení na zakázku se množství zaznamená u zakázky, ale nepřičte se do centrálního skladu. Nákupní cena se uloží do skladové položky; prodejní cena pro faktury zůstane samostatná.</p>`;
     openModal(existing?'Zkontrolovat příchozí dodací list':'Zadat příjem materiálu',body,'Potvrdit zařazení','save-incoming-receipt');
   }
   function openInvoiceForm(deliveryId='') {
@@ -450,7 +462,7 @@
       if(!errors.length)for(const item of output){const current=project(item.id);if(current)Object.assign(current,item);else state.projects.unshift(item);}return errors;
     }
     if(page==='materials'){
-      const output=rows.map((row,index)=>{const n=index+2,idValue=csvValue(row,'Kód','ID','Materiál ID')||id('MAT'),stock=number(row,['Skladem','Množství','Stav skladu'],'sklad',n),min=number(row,['Minimální zásoba','Minimum','Min'],'minimum',n,false),price=number(row,['Cena','Cena za jednotku','Cena / jedn.'],'cena',n,false),name=csvValue(row,'Materiál','Název','Název materiálu');if(!name)errors.push(`řádek ${n}: chybí název materiálu`);return {id:idValue,name,category:csvValue(row,'Kategorie')||'Ostatní',unit:csvValue(row,'Jednotka','MJ')||'ks',stock,min,price,location:csvValue(row,'Umístění','Regál')};});
+      const output=rows.map((row,index)=>{const n=index+2,idValue=csvValue(row,'Kód','ID','Materiál ID')||id('MAT'),stock=number(row,['Skladem','Množství','Stav skladu'],'sklad',n),min=number(row,['Minimální zásoba','Minimum','Min'],'minimum',n,false),purchasePriceText=csvValue(row,'Nákupní cena','Nákupní cena / jednotku'),purchasePrice=purchasePriceText===''?undefined:number(row,['Nákupní cena','Nákupní cena / jednotku'],'nákupní cena',n,false),price=number(row,['Prodejní cena','Prodejní cena / jednotku','Cena','Cena za jednotku','Cena / jedn.'],'prodejní cena',n,false),name=csvValue(row,'Materiál','Název','Název materiálu');if(!name)errors.push(`řádek ${n}: chybí název materiálu`);return {id:idValue,name,category:csvValue(row,'Kategorie')||'Ostatní',unit:csvValue(row,'Jednotka','MJ')||'ks',stock,min,...(purchasePrice===undefined?{}:{purchasePrice}),price,location:csvValue(row,'Umístění','Regál')};});
       if(!errors.length)for(const item of output){const current=material(item.id);if(current){const delta=Number(item.stock)-Number(current.stock);Object.assign(current,item);if(delta)state.movements.unshift({id:id('SM'),materialId:item.id,date:day,direction:delta>0?'in':'out',qty:Math.abs(delta),note:'Úprava při importu CSV'});}else{state.materials.unshift(item);if(item.stock)state.movements.unshift({id:id('SM'),materialId:item.id,date:day,direction:'in',qty:item.stock,note:'Počáteční stav při importu CSV'});}}return errors;
     }
     if(page==='attendance'){
@@ -502,7 +514,7 @@
   function exportPageCsv(page) {
     const definitions={
       projects:['ml-work-zakazky.csv',[['Číslo','Název','Zákazník','Adresa','Odpovědný','Termín','Stav'],...state.projects.map(p=>[p.id,p.name,p.client,p.address,p.manager,p.due,p.status])]],
-      materials:['ml-work-sklad.csv',[['Kód','Materiál','Kategorie','Jednotka','Skladem','Minimální zásoba','Cena','Umístění'],...state.materials.map(m=>[m.id,m.name,m.category,m.unit,m.stock,m.min,m.price,m.location])]],
+      materials:['ml-work-sklad.csv',[['Kód','Materiál','Kategorie','Jednotka','Skladem','Minimální zásoba','Nákupní cena','Prodejní cena','Umístění'],...state.materials.map(m=>[m.id,m.name,m.category,m.unit,m.stock,m.min,m.purchasePrice,m.price,m.location])]],
       deliveries:['ml-work-dodaci-listy.csv',[['Dodací list','Datum','Zakázka ID','Vydal','Poznámka','Materiál ID','Množství'],...state.deliveries.flatMap(d=>d.items.map(i=>[d.id,d.date,d.projectId,d.person,d.note,i.materialId,i.qty]))]],
       invoices:['ml-work-faktury.csv',[['Faktura','Dodací list','Zakázka ID','Vystaveno','Splatnost','Stav','Částka'],...state.invoices.map(i=>[i.id,i.deliveryId,i.projectId,i.date,i.due,i.status,i.amount])]],
       attendance:['ml-work-dochazka.csv',[['ID','Datum','Pracovník','Zakázka ID','Příchod','Odchod','Poznámka'],...state.attendance.map(a=>[a.id,a.date,a.employee,a.projectId,a.start,a.end,a.note])]],
@@ -716,8 +728,8 @@
       try{
         const {user}=await window.MLAuth.createUser({full_name:data.name,email:data.email,phone:data.phone,hourly_rate:Number(data.hourlyRate),role:data.role,password:data.password});
         state.users.unshift(mapDatabaseUser(user));
-        log(`Byl vytvořen účet ${user.full_name} (${window.MLAuth.displayRole(user)}).`,'Uživatelé');
-        closeModal();render();notify('Uživatel byl vytvořen a může se přihlásit.');
+        const saved=await log(`Byl vytvořen účet ${user.full_name} (${window.MLAuth.displayRole(user)}).`,'Uživatelé');
+        closeModal();render();notify(saved?'Zaměstnanec byl uložen a může se přihlásit.':'Účet zaměstnance je uložen. Provozní záznam se nepodařilo uložit.');
       }catch(error){notify(error.message||'Uživatele se nepodařilo vytvořit.');}
       return;
     }
@@ -727,7 +739,7 @@
         const {user}=await window.MLAuth.updateUser(data.recordId,{full_name:data.name,email:data.email,phone:data.phone,hourly_rate:Number(data.hourlyRate),role:data.role});
         const index=state.users.findIndex(item=>item.id===user.id);if(index>=0)state.users[index]=mapDatabaseUser(user);
         if(previousName&&previousName!==user.full_name){for(const project of state.projects)if(project.manager===previousName)project.manager=user.full_name;for(const attendance of state.attendance)if(attendance.employee===previousName)attendance.employee=user.full_name;}
-        log(`Účet ${user.email} byl upraven.`,'Uživatelé');await save();closeModal();render();notify('Uživatelský účet byl upraven.');
+        const saved=await log(`Účet ${user.email} byl upraven.`,'Uživatelé');closeModal();render();notify(saved?'Údaje zaměstnance byly uloženy.':'Údaje zaměstnance jsou uložené. Provozní záznam se nepodařilo uložit.');
       }catch(error){notify(error.message||'Uživatele se nepodařilo upravit.');}
       return;
     }
@@ -736,7 +748,7 @@
       if(data.recordId){const p=project(data.recordId);Object.assign(p,{name:data.name,client:data.client,address:data.address,manager:data.manager,status:data.status,due:data.due,assignedUsers,hourlyRates:data.hourlyRates});log(`Zakázka ${p.id} byla upravena.`,'Zakázky');}
       else {const p={id:nextNumberId('ML-',state.projects),name:data.name,client:data.client,address:data.address,manager:data.manager,status:data.status,due:data.due,assignedUsers,hourlyRates:data.hourlyRates};state.projects.unshift(p);log(`Byla vytvořena zakázka ${p.id} – ${p.name}.`,'Zakázky');}
     } else if(action==='save-material') {
-      const m={id:data.recordId||id('MAT'),name:data.name,category:data.category,unit:data.unit,stock:Number(data.stock),min:Number(data.min),price:Number(data.price),location:data.location};
+      const m={id:data.recordId||id('MAT'),name:data.name,category:data.category,unit:data.unit,stock:Number(data.stock),min:Number(data.min),purchasePrice:Number(data.purchasePrice),price:Number(data.price),location:data.location};
       if(data.recordId){const old=material(data.recordId),delta=Number(m.stock)-Number(old.stock);Object.assign(old,m);if(delta)state.movements.unshift({id:id('SM'),materialId:m.id,date:day,direction:delta>0?'in':'out',qty:Math.abs(delta),note:'Úprava stavu při editaci materiálu'});log(`Materiál ${m.name} byl upraven.`,'Sklad');}
       else {state.materials.unshift(m);if(m.stock)state.movements.unshift({id:id('SM'),materialId:m.id,date:day,direction:'in',qty:m.stock,note:'Počáteční stav materiálu'});log(`Do skladu byla přidána položka ${m.name}.`,'Sklad');}
     } else if(action==='save-incoming-receipt') {
@@ -753,11 +765,11 @@
         let item=line.materialId?material(line.materialId):null;
         if(line.materialId&&!item){notify('Vybraný materiál už v katalogu není. Obnovte formulář a zkuste to znovu.');return;}
         if(!item&&data.destination==='warehouse'){
-          item={id:nextNumberId('MAT-',state.materials),name:line.name,category:line.category,unit:line.unit,stock:0,min:0,price:0,location:'Příjem'};
+          item={id:nextNumberId('MAT-',state.materials),name:line.name,category:line.category,unit:line.unit,stock:0,min:0,purchasePrice:line.purchasePrice,price:0,location:'Příjem'};
           state.materials.unshift(item);line.materialId=item.id;
         }
         if(item){line.name=item.name;line.category=item.category;line.unit=item.unit;}
-        if(data.destination==='warehouse'&&item){item.stock=Number(item.stock)+line.qty;state.movements.unshift({id:id('SM'),materialId:item.id,date:data.date,direction:'in',qty:line.qty,note:`Příjem ${data.documentNumber||receiptId} od ${data.supplier||'dodavatele'}`});}
+        if(data.destination==='warehouse'&&item){item.stock=Number(item.stock)+line.qty;if(line.purchasePrice>0)item.purchasePrice=line.purchasePrice;state.movements.unshift({id:id('SM'),materialId:item.id,date:data.date,direction:'in',qty:line.qty,note:`Příjem ${data.documentNumber||receiptId} od ${data.supplier||'dodavatele'}`});}
       }
       Object.assign(receipt,{supplier:data.supplier.trim(),documentNumber:data.documentNumber.trim(),date:data.date,destination:data.destination,projectId:data.destination==='project'?data.projectId:'',note:data.note.trim(),status:'Potvrzeno',items:lines,source:receipt.source||'manual'});
       if(!state.incomingReceipts.some(item=>item.id===receiptId))state.incomingReceipts.unshift(receipt);
@@ -813,7 +825,7 @@
     const projectToggle=event.target.closest('[data-project-toggle]');
     if(projectToggle){const rateInput=projectToggle.closest('.assignment-member')?.querySelector('[data-project-rate]');if(rateInput)rateInput.disabled=!projectToggle.checked;}
     const materialSelect=event.target.closest('.incoming-item-row select[name="materialId"]');
-    if(materialSelect?.value){const item=material(materialSelect.value),row=materialSelect.closest('.incoming-item-row');if(item&&row){row.querySelector('[name="name"]').value=item.name;row.querySelector('[name="category"]').value=item.category;row.querySelector('[name="unit"]').value=item.unit;}}
+    if(materialSelect?.value){const item=material(materialSelect.value),row=materialSelect.closest('.incoming-item-row');if(item&&row){row.querySelector('[name="name"]').value=item.name;row.querySelector('[name="category"]').value=item.category;row.querySelector('[name="unit"]').value=item.unit;row.querySelector('[name="purchasePrice"]').value=item.purchasePrice||0;}}
     const input=event.target.closest('[data-csv-input]');if(input?.files?.[0])importCsvFile(input.dataset.csvInput,input.files[0]);
   });
   $('#modal-form').addEventListener('submit',handleFormSubmit);

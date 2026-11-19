@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS materials (
   stock REAL NOT NULL DEFAULT 0 CHECK (stock >= 0),
   minimum_stock REAL NOT NULL DEFAULT 0 CHECK (minimum_stock >= 0),
   unit_price REAL NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
+  purchase_unit_price REAL NOT NULL DEFAULT 0 CHECK (purchase_unit_price >= 0),
   location TEXT NOT NULL DEFAULT '',
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),
