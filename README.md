@@ -6,6 +6,8 @@ Prohlížeč komunikuje pouze s Node.js serverem přes HTTPS. Přihlašovací ú
 
 Uživatelské účty zakládá správce ručně na stránce Uživatelé; veřejná žádost o přístup ani registrace nejsou zapnuté. Na stránkách zakázek, docházky, skladu, dodacích listů, fakturace, uživatelů a aktivity jsou importy a exporty CSV. CSV soubory používají české záhlaví, oddělovač čárkou nebo středníkem a u uživatelů je pro import potřeba sloupec s heslem alespoň 8 znaků. Účty jsou uloženy jako zabezpečené otisky hesel.
 
+V přehledu zaměstnanců správce ukládá jméno, telefon, e-mail a výchozí hodinovou sazbu. Při přiřazení pracovníků k zakázce lze sazbu pro každého člověka nastavit samostatně; sazba zakázky se uloží spolu s přiřazením.
+
 Ve skladu lze přes **Vyskladnit na zakázku** vytvořit jeden dodací list s libovolným počtem materiálových položek; každé množství se ověří a při uložení odečte. Odstranění dodacího listu smaže také jeho položky a vrátí množství do skladu. Pokud je k listu připojená faktura, správce odstranění faktury výslovně potvrdí.
 
 ## Spuštění ve Windows
@@ -17,11 +19,9 @@ Ve skladu lze přes **Vyskladnit na zakázku** vytvořit jeden dodací list s li
 
 Soubor `.env` obsahuje lokální cestu k SQLite, údaje správce a PFX pro HTTPS. `.env`, `.certs` a `.data` jsou ignorované Gitem. Databáze je soubor `.data/ml-work.sqlite`; pro zálohu aplikaci ukonči a zkopíruj tento soubor nebo použij export zálohy v aplikaci. Certifikát pro `localhost` je potřeba jednou přidat mezi důvěryhodné certifikáty aktuálního uživatele; lokální certifikát není určený pro veřejný web.
 
-## Příjem dodacích listů e-mailem
+## Příjem dokladů
 
-Aplikace je připravena číst schránku Seznam přes zabezpečený IMAP (`imap.seznam.cz`, port `993`). V `.env` jsou nastavené jméno schránky `pmagusin@seznam.cz` a složka `INBOX`; doplň `MAIL_IMAP_PASSWORD` heslem pro poštovní aplikace. Pokud má účet zapnuté dvoufázové ověření, vytvoř v zabezpečení účtu Seznamu zvláštní heslo pro IMAP/POP3/SMTP. Toto heslo neposílej do chatu a nevkládej ho do zdrojových souborů. Po úpravě `.env` restartuj server.
-
-Po doplnění hesla pro poštovní aplikaci a restartu server kontroluje schránku každé dvě minuty; synchronizaci lze spustit také ručně na stránce Sklad. Nepřečtené zprávy s dodacím listem nebo s podporovanou přílohou se uloží jako čekající příjem. Ve skladu lze také ručně nahrát fakturu nebo dodací list ve formátu PDF, CSV či obrázku. Z CSV a textových PDF se aplikace pokusí předvyplnit údaje a položky; obrázky a naskenovaná PDF je třeba zkontrolovat a položky doplnit ručně. Všechny importy zůstanou ve frontě ke kontrole a do zásob se promítnou až po potvrzení správcem. Před potvrzením správce vybere centrální sklad či konkrétní zakázku. U přímého příjmu na zakázku se centrální sklad nezvýší.
+Automatické propojení s e-mailovou schránkou je vypnuté. Ve skladu lze ručně nahrát fakturu nebo dodací list ve formátu PDF, CSV či obrázku. Z CSV a textových PDF se aplikace pokusí předvyplnit údaje a položky; obrázky a naskenovaná PDF je třeba zkontrolovat a položky doplnit ručně. Nahrané doklady zůstanou ve frontě ke kontrole a do zásob se promítnou až po potvrzení správcem. Před potvrzením správce vybere centrální sklad či konkrétní zakázku. U přímého příjmu na zakázku se centrální sklad nezvýší.
 
 Příchozí doklady se označí jako možné duplicity při shodě obsahu souboru nebo dodavatele a čísla dokladu. Čekající doklad lze smazat bez změny zásob. U potvrzeného příjmu na sklad se při smazání množství odečte zpět; pokud už bylo vydáno, aplikace smazání odmítne, aby sklad nespadl do nesouladu.
 

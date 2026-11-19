@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS app_users (
   role TEXT NOT NULL DEFAULT 'employee'
     CHECK (role IN ('admin','project_manager','foreman','technician','office','employee')),
   password_hash TEXT NOT NULL,
+  phone TEXT NOT NULL DEFAULT '',
+  hourly_rate REAL NOT NULL DEFAULT 0 CHECK (hourly_rate >= 0),
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),
   updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000)
@@ -55,6 +57,7 @@ CREATE INDEX IF NOT EXISTS projects_client_idx ON projects(client_id);
 CREATE TABLE IF NOT EXISTS project_assignments (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  hourly_rate REAL NOT NULL DEFAULT 0 CHECK (hourly_rate >= 0),
   assigned_by TEXT REFERENCES app_users(id) ON DELETE SET NULL,
   assigned_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),
   PRIMARY KEY(project_id,user_id)

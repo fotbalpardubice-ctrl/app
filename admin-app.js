@@ -67,10 +67,9 @@
   let databaseWriteBlocked = false;
   let databaseSaveQueue = Promise.resolve();
   let databaseWritesPending = 0;
-  let mailStatus={configured:false,user:'pmagusin@seznam.cz',host:'imap.seznam.cz',port:993,folder:'INBOX',lastSyncAt:null,lastError:'',lastImported:0,running:false};
   let incomingUploadRunning=false;
   let toastTimer;
-  const pageNames = {overview:'Přehled',projects:'Zakázky',attendance:'Docházka',materials:'Sklad materiálu',deliveries:'Dodací listy',invoices:'Fakturace',users:'Uživatelé',activity:'Aktivita',settings:'Nastavení'};
+  const pageNames = {overview:'Přehled',projects:'Zakázky',attendance:'Docházka',materials:'Sklad materiálu',deliveries:'Dodací listy',invoices:'Fakturace',users:'Zaměstnanci',activity:'Aktivita',settings:'Nastavení'};
   const $ = (selector, root=document) => root.querySelector(selector);
   const esc = (value='') => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const id = (prefix) => `${prefix}-${crypto.randomUUID()}`;
@@ -124,7 +123,7 @@
     return databaseSaveQueue;
   }
   function mapDatabaseUser(user) {
-    return {id:user.id,name:user.full_name,email:user.email,role:window.MLAuth.displayRole(user),status:user.is_active?'Aktivní':'Pozastaveno',is_active:user.is_active};
+    return {id:user.id,name:user.full_name,email:user.email,phone:user.phone||'',hourlyRate:Number(user.hourly_rate)||0,role:window.MLAuth.displayRole(user),status:user.is_active?'Aktivní':'Pozastaveno',is_active:user.is_active};
   }
   async function loadDatabaseState() {
     const remote=await window.MLAuth.adminState();
@@ -154,10 +153,6 @@
         databaseRevision=Number(remote.revision||0);
         try{localStorage.setItem(storageKey,JSON.stringify(state));}catch(_){/* The database remains the primary store. */}
         changed=true;
-      }
-      if(['materials','settings'].includes(page)){
-        const status=await window.MLAuth.mailStatus();
-        if(JSON.stringify(status)!==JSON.stringify(mailStatus)){mailStatus=status;changed=true;}
       }
       if(!changed)return;
       render();
@@ -263,7 +258,7 @@
       }).join('');
       return `${pageHeader('Sklad materiálu','Katalog, skladové zásoby a výdeje materiálu na jednotlivé zakázky.',`<div class="header-actions">${button('Vyskladnit na zakázku','new-stock-delivery')}${button('＋ Nahrát fakturu / dodací list', 'upload-incoming-file',incomingUploadRunning?'disabled':'')}${button('＋ Nová položka','new-material')} ${button('Pohyb skladu','stock-adjust')}${csvTools('materials')}</div>`)}
         <div class="stats stats--compact"><div class="stat"><span class="stat-top">Položek v katalogu</span><b class="stat-value">${state.materials.length}</b></div><div class="stat"><span class="stat-top">Položek pod limitem</span><b class="stat-value">${lowStock().length}</b></div><div class="stat"><span class="stat-top">Odhadovaná hodnota skladu</span><b class="stat-value stat-value--money">${money(stockValue)}</b></div><div class="stat"><span class="stat-top">Výdej se eviduje přes</span><b class="stat-value stat-value--word">Dodací list</b></div></div>
-        <section class="panel page-panel"><div class="panel-heading"><div><h2>Příchozí dodací listy</h2><p>${pendingReceipts.length} čekají na kontrolu · nejdřív vyberte sklad nebo konkrétní zakázku.</p></div><div class="header-actions">${button('＋ Zadat příjem','new-incoming-receipt')}${button(mailStatus.running?'Načítám poštu…':'Synchronizovat e-mail','mail-sync',mailStatus.running?'disabled':'')}</div></div><p class="mail-status">${mailStatus.configured?`Schránka ${esc(mailStatus.user)} se kontroluje každé dvě minuty.`:'E-mail čeká na přístupové heslo pro poštovní aplikaci. Více v Nastavení.'}</p>${mailStatus.lastError?`<p class="mail-warning">${esc(mailStatus.lastError)}</p>`:''}<div class="incoming-list">${receiptRows||'<p class="muted">Zatím tu nejsou žádné příchozí dodací listy.</p>'}</div></section>
+        <section class="panel page-panel"><div class="panel-heading"><div><h2>Příchozí doklady</h2><p>${pendingReceipts.length} čekají na kontrolu · nejdřív vyberte sklad nebo konkrétní zakázku.</p></div><div class="header-actions">${button('＋ Zadat příjem','new-incoming-receipt')}</div></div><p class="muted">Dodací listy a faktury přidejte ručně nebo je nahrajte jako soubor.</p><div class="incoming-list">${receiptRows||'<p class="muted">Zatím tu nejsou žádné příchozí doklady.</p>'}</div></section>
         <section class="panel page-panel"><div class="panel-heading"><div><h2>Stav skladu</h2><p>Výdej na zakázku vytvoří dodací list a sníží dostupné množství.</p></div></div>${searchTools('Hledat kód, materiál nebo kategorii',statusFilter(['Nízký stav','V pořádku']))}<div class="table-wrap"><table><thead><tr><th>KÓD</th><th>MATERIÁL</th><th>JEDNOTKA</th><th>SKLADEM</th><th>CENA / JEDN.</th><th>STAV</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty-cell">Katalog materiálu je prázdný.</td></tr>'}</tbody></table></div></section>`;
     },
     deliveries() {
@@ -288,8 +283,9 @@
         <section class="panel page-panel"><div class="panel-heading"><div><h2>Docházkové záznamy</h2><p>Aktivní pracovní záznam zůstane otevřený do zapsání odchodu.</p></div></div>${searchTools('Hledat jméno nebo zakázku',statusFilter(['Na pracovišti','Uzavřeno']))}<div class="table-wrap"><table><thead><tr><th>DATUM</th><th>PRACOVNÍK</th><th>ZAKÁZKA</th><th>PŘÍCHOD</th><th>ODCHOD</th><th>ČAS</th><th>POZNÁMKA</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty-cell">Zatím nejsou žádné docházkové záznamy.</td></tr>'}</tbody></table></div></section>`;
     },
     users() {
-      const rows = state.users.map(u=>`<tr data-search="${esc(`${u.name} ${u.email} ${u.role}`)}" data-status="${esc(u.status)}"><td><div class="person"><span class="avatar avatar--table">${esc(initials(u.name))}</span><span><b>${esc(u.name)}</b><small>${esc(u.email)}</small></span></div></td><td>${esc(u.role)}</td><td>${statusPill(u.status)}</td><td>${u.role==='Administrátor'?'Správce':`<button class="text-button" data-action="edit-user" data-id="${esc(u.id)}">Upravit</button><button class="text-button" data-action="user-toggle" data-id="${esc(u.id)}">${u.status==='Aktivní'?'Pozastavit':'Aktivovat'}</button><button class="text-button text-button--danger" data-action="delete-user" data-id="${esc(u.id)}">Odstranit</button>`}</td></tr>`).join('');
-      return `${pageHeader('Uživatelé','Přehled členů týmu a jejich oprávnění.',`<div class="header-actions">${button('＋ Přidat uživatele','new-user')}${csvTools('users')}</div>`)}<section class="panel page-panel"><div class="panel-heading"><div><h2>Členové týmu</h2><p>${state.users.filter(u=>u.status==='Aktivní').length} aktivních uživatelů</p></div></div>${searchTools('Hledat jméno, e-mail nebo roli',statusFilter(['Aktivní','Pozastaveno']))}<div class="table-wrap"><table><thead><tr><th>UŽIVATEL</th><th>ROLE</th><th>STAV ÚČTU</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+      const employees=state.users.filter(user=>user.role!=='Administrátor');
+      const rows = employees.map(u=>`<tr data-search="${esc(`${u.name} ${u.phone||''} ${u.email} ${u.role}`)}" data-status="${esc(u.status)}"><td><div class="person"><span class="avatar avatar--table">${esc(initials(u.name))}</span><span><b>${esc(u.name)}</b><small>${esc(u.role)}</small></span></div></td><td>${esc(u.phone||'—')}</td><td>${esc(u.email)}</td><td><b>${money(u.hourlyRate||0)}</b><small class="cell-sub">za hodinu</small></td><td>${statusPill(u.status)}</td><td class="row-actions"><button class="text-button" data-action="edit-user" data-id="${esc(u.id)}">Upravit</button><button class="text-button" data-action="user-toggle" data-id="${esc(u.id)}">${u.status==='Aktivní'?'Pozastavit':'Aktivovat'}</button><button class="text-button text-button--danger" data-action="delete-user" data-id="${esc(u.id)}">Odstranit</button></td></tr>`).join('');
+      return `${pageHeader('Zaměstnanci','Kontaktní přehled týmu a jejich výchozí hodinové sazby.',`<div class="header-actions">${button('＋ Přidat zaměstnance','new-user')}${csvTools('users')}</div>`)}<section class="panel page-panel"><div class="panel-heading"><div><h2>Přehled zaměstnanců</h2><p>${employees.filter(u=>u.status==='Aktivní').length} aktivních členů týmu · sazbu lze na zakázce upravit individuálně.</p></div></div>${searchTools('Hledat jméno, telefon, e-mail nebo roli',statusFilter(['Aktivní','Pozastaveno']))}<div class="table-wrap"><table><thead><tr><th>JMÉNO / ROLE</th><th>TELEFON</th><th>E-MAIL</th><th>VÝCHOZÍ SAZBA</th><th>STAV ÚČTU</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty-cell">Zatím nejsou přidaní zaměstnanci.</td></tr>'}</tbody></table></div></section>`;
     },
     activity() {
       return `${pageHeader('Aktivita','Časová osa důležitých změn v zakázkách, skladu, docházce a dokladech.',csvTools('activity'))}
@@ -297,11 +293,9 @@
     },
     settings() {
       const invoiceTemplate=state.invoiceTemplate||demo.invoiceTemplate;
-      const mailConnection=mailStatus.configured?`Připojeno k ${esc(mailStatus.user)} přes zabezpečený IMAP. Kontrola nové pošty probíhá každé 2 minuty.`:`Čeká na heslo pro poštovní aplikaci. Přístupové údaje se doplní do místního nastavení serveru.`;
       return `${pageHeader('Nastavení','Základní nastavení pracovního prostoru a správa uložených dat.')}
         <div class="settings-grid"><section class="panel page-panel"><div class="panel-heading"><div><h2>Pracovní prostor</h2><p>Informace používané v přehledech a dokladech.</p></div></div><dl class="settings-list"><div><dt>Název firmy</dt><dd>ML Work</dd></div><div><dt>Výchozí správce</dt><dd>Účet přihlášeného správce</dd></div><div><dt>Měna</dt><dd>Česká koruna (Kč)</dd></div><div><dt>Úložiště</dt><dd>Lokální SQLite databáze</dd></div></dl></section>
         <section class="panel page-panel"><div class="panel-heading"><div><h2>Vzor faktury</h2><p>Společné údaje a výchozí podmínky pro nově vystavené faktury.</p></div><div class="header-actions">${button('Náhled vzoru','preview-invoice-template')}${button('Upravit vzor','edit-invoice-template')}</div></div><dl class="settings-list"><div><dt>Dodavatel</dt><dd>${esc(invoiceTemplate.company||'ML Work')}</dd></div><div><dt>Adresa</dt><dd>${esc(invoiceTemplate.address||'Doplnit')}</dd></div><div><dt>IČO / DIČ</dt><dd>${esc(invoiceTemplate.ico||'Doplnit')} / ${esc(invoiceTemplate.dic||'—')}</dd></div><div><dt>Bankovní účet</dt><dd>${esc(invoiceTemplate.bankAccount||'Doplnit')}</dd></div><div><dt>Splatnost / DPH</dt><dd>${Number(invoiceTemplate.dueDays||14)} dní / ${Number(invoiceTemplate.vatRate||0)} %</dd></div></dl><p class="notice-box">Údaje faktury doplňte před prvním ostrým vystavením. Provozní ukázková faktura není účetní ani daňový doklad.</p></section>
-        <section class="panel page-panel"><div class="panel-heading"><div><h2>Příchozí dodací listy e-mailem</h2><p>${esc(mailConnection)}</p></div>${button('Synchronizovat e-mail','mail-sync',mailStatus.running?'disabled':'')}</div><dl class="settings-list"><div><dt>Schránka</dt><dd>${esc(mailStatus.user)}</dd></div><div><dt>Server</dt><dd>${esc(mailStatus.host)}:${Number(mailStatus.port)}</dd></div><div><dt>Složka</dt><dd>${esc(mailStatus.folder)}</dd></div><div><dt>Poslední kontrola</dt><dd>${mailStatus.lastSyncAt?new Date(mailStatus.lastSyncAt).toLocaleString('cs-CZ'):'Zatím neproběhla'}</dd></div></dl>${mailStatus.lastError?`<p class="mail-warning">${esc(mailStatus.lastError)}</p>`:''}<div class="notice-box">Aplikace projde nepřečtené zprávy, které zmiňují dodací list nebo mají přílohu PDF, CSV, Excel či obrázek, a zařadí je do kontroly. Příloha se nezaúčtuje automaticky; před potvrzením zkontrolujete materiál a vyberete sklad nebo zakázku.</div></section>
         <section class="panel page-panel"><div class="panel-heading"><div><h2>Data a export</h2><p>Stáhněte si zálohu nebo exportujte tabulku.</p></div></div><div class="settings-actions"><button class="export" data-action="backup">Stáhnout zálohu dat (.json)</button><button class="export" data-action="export-projects">Exportovat zakázky (.csv)</button><button class="export" data-action="export-materials">Exportovat sklad (.csv)</button><button class="export" data-action="export-deliveries">Exportovat dodací listy (.csv)</button></div><div class="notice-box">Provozní záznamy a uživatelské účty se ukládají do lokální databáze tohoto počítače. Zálohu pravidelně stáhněte a uložte mimo tento počítač.</div></section>
         <section class="panel page-panel settings-danger"><div class="panel-heading"><div><h2>Obnovit ukázková data</h2><p>Odstraní místní změny a vrátí původní demonstrační záznamy.</p></div></div><button class="export export--danger" data-action="reset-data">Obnovit ukázková data</button></section></div>`;
     }
@@ -319,13 +313,13 @@
   }
   const field = (label,name,value='',type='text',required=true,extra='') => `<label class="form-field"><span>${label}</span><input name="${name}" type="${type}" value="${esc(value)}" ${required?'required':''} ${extra}></label>`;
   const selectField = (label,name,options,selected='') => `<label class="form-field"><span>${label}</span><select name="${name}" required>${options.map(([value,text])=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(text)}</option>`).join('')}</select></label>`;
-  function assignmentField(selected=[]){
-    const employees=state.users.filter(user=>user.is_active&&user.role!=='Administrátor');
-    return `<fieldset class="assignment-field"><legend>Přiřazení pracovníci</legend>${employees.length?`<div class="assignment-list">${employees.map(user=>`<label><input type="checkbox" name="assignedUsers" value="${esc(user.id)}" ${selected.includes(user.id)?'checked':''}><span><b>${esc(user.name)}</b><small>${esc(user.role)}</small></span></label>`).join('')}</div>`:'<p class="form-hint">Nejdřív přidejte a aktivujte zaměstnance v části Uživatelé.</p>'}</fieldset>`;
+  function assignmentField(selected=[],rates={}){
+    const employees=state.users.filter(user=>user.role!=='Administrátor'&&(user.is_active||selected.includes(user.id)));
+    return `<fieldset class="assignment-field"><legend>Přiřazení pracovníci a sazby</legend>${employees.length?`<div class="assignment-list">${employees.map(user=>{const assigned=selected.includes(user.id),rate=Object.hasOwn(rates,user.id)?rates[user.id]:user.hourlyRate||0;return `<div class="assignment-member"><label class="assignment-person"><input type="checkbox" name="assignedUsers" value="${esc(user.id)}" data-project-toggle ${assigned?'checked':''}><span><b>${esc(user.name)}</b><small>${esc(user.role)} · výchozí ${money(user.hourlyRate||0)}/hod</small></span></label><label class="assignment-hourly"><span>Kč / hod</span><input type="number" min="0" max="10000000" step="0.01" data-project-rate data-user-id="${esc(user.id)}" value="${esc(rate)}" ${assigned?'':'disabled'}></label></div>`;}).join('')}</div>`:'<p class="form-hint">Nejdřív přidejte a aktivujte zaměstnance v části Zaměstnanci.</p>'}<p class="form-hint">Sazba u zakázky se nastaví podle výchozí sazby zaměstnance. Zde ji můžete pro tuto zakázku změnit.</p></fieldset>`;
   }
   function openProjectForm(projectId='') {
-    const p = project(projectId) || {name:'',client:'',address:'',manager:'',status:'Probíhá',due:isoOffset(14),assignedUsers:[]};
-    const body = `<input type="hidden" name="recordId" value="${esc(projectId)}"><div class="form-grid">${field('Název zakázky','name',p.name)}${field('Zákazník','client',p.client)}${field('Adresa realizace','address',p.address)}${field('Odpovědná osoba','manager',p.manager)}${field('Termín dokončení','due',p.due,'date')}${selectField('Stav','status',['Probíhá','Čeká na zahájení','Dokončeno','Pozastaveno'].map(x=>[x,x]),p.status)}${assignmentField(Array.isArray(p.assignedUsers)?p.assignedUsers:[])}</div>`;
+    const p = project(projectId) || {name:'',client:'',address:'',manager:'',status:'Probíhá',due:isoOffset(14),assignedUsers:[],hourlyRates:{}};
+    const body = `<input type="hidden" name="recordId" value="${esc(projectId)}"><div class="form-grid">${field('Název zakázky','name',p.name)}${field('Zákazník','client',p.client)}${field('Adresa realizace','address',p.address)}${field('Odpovědná osoba','manager',p.manager)}${field('Termín dokončení','due',p.due,'date')}${selectField('Stav','status',['Probíhá','Čeká na zahájení','Dokončeno','Pozastaveno'].map(x=>[x,x]),p.status)}${assignmentField(Array.isArray(p.assignedUsers)?p.assignedUsers:[],p.hourlyRates||{})}</div>`;
     openModal(projectId?'Upravit zakázku':'Nová zakázka',body,projectId?'Uložit změny':'Vytvořit zakázku','save-project');
   }
   function openMaterialForm(materialId='') {
@@ -390,7 +384,7 @@
     const item=state.users.find(user=>user.id===userId);
     const roleCodes={Technik:'technician','Vedoucí montáže':'foreman','Projektový manažer':'project_manager',Administrativa:'office','Zaměstnanec':'employee'};
     const role=roleCodes[item?.role]||'employee';
-    const body = `<input type="hidden" name="recordId" value="${esc(userId)}"><div class="form-grid">${field('Jméno a příjmení','name',item?.name||'')}${field('Firemní e-mail','email',item?.email||'','email')}${selectField('Role','role',[['technician','Technik'],['foreman','Vedoucí montáže'],['project_manager','Projektový manažer'],['office','Administrativa'],['employee','Zaměstnanec']],role)}${item?'':'<label class="form-field"><span>Počáteční heslo</span><input name="password" type="password" required minlength="8" autocomplete="new-password"></label>'}</div>${item?'':'<p class="form-hint">Uživatel se bude moci přihlásit tímto e-mailem a počátečním heslem. Heslo se uloží pouze jako zabezpečený otisk.</p>'}`;
+    const body = `<input type="hidden" name="recordId" value="${esc(userId)}"><div class="form-grid">${field('Jméno a příjmení','name',item?.name||'')}${field('Telefonní číslo','phone',item?.phone||'','tel',false,'autocomplete="tel"')}${field('Firemní e-mail','email',item?.email||'','email')}${field('Výchozí hodinová sazba (Kč)','hourlyRate',item?.hourlyRate||0,'number',true,'min="0" max="10000000" step="0.01"')}${selectField('Role','role',[['technician','Technik'],['foreman','Vedoucí montáže'],['project_manager','Projektový manažer'],['office','Administrativa'],['employee','Zaměstnanec']],role)}${item?'':'<label class="form-field"><span>Počáteční heslo</span><input name="password" type="password" required minlength="8" autocomplete="new-password"></label>'}</div>${item?'':'<p class="form-hint">Uživatel se bude moci přihlásit tímto e-mailem a počátečním heslem. Heslo se uloží pouze jako zabezpečený otisk.</p>'}`;
     openModal(item?'Upravit uživatele':'Přidat uživatele',body,item?'Uložit změny':'Přidat uživatele',item?'save-user-edit':'save-user');
   }
   function projectDetail(projectId) {
@@ -399,16 +393,17 @@
     const docs = state.deliveries.filter(d=>d.projectId===p.id);
     const directReceipts=state.incomingReceipts.filter(receipt=>receipt.status==='Potvrzeno'&&receipt.destination==='project'&&receipt.projectId===p.id);
     const totals = new Map();
+    const assignedRateRows=(Array.isArray(p.assignedUsers)?p.assignedUsers:[]).map(userId=>{const user=state.users.find(item=>item.id===userId);if(!user)return '';const rate=p.hourlyRates&&Object.hasOwn(p.hourlyRates,userId)?p.hourlyRates[userId]:user.hourlyRate;return `<div class="compact-row"><span><b>${esc(user.name)}</b><small>${esc(user.role)}</small></span><b>${money(rate||0)} / hod</b></div>`;}).join('');
     const addTotal=(item)=>{const key=item.materialId||`name:${item.name}`;const total=totals.get(key)||{qty:0,unit:item.unit||material(item.materialId)?.unit||''};total.qty+=Number(item.qty);totals.set(key,total);};
     docs.forEach(d=>d.items.forEach(addTotal));
     directReceipts.forEach(receipt=>receipt.items.forEach(addTotal));
     const used = [...totals.entries()].map(([key,total])=>{const materialId=key.startsWith('name:')?'':key,name=materialId?materialName(materialId):key.slice(5);const refs=[...docs.filter(d=>d.items.some(i=>(i.materialId||`name:${i.name}`)===key)).map(d=>d.id),...directReceipts.filter(r=>r.items.some(i=>(i.materialId||`name:${i.name}`)===key)).map(r=>r.documentNumber||r.id)];return `<tr><td>${esc(name)}</td><td>${total.qty} ${esc(total.unit)}</td><td>${refs.map(esc).join(', ')}</td></tr>`;}).join('');
     const docsHtml=[...docs.map(d=>`<div class="compact-row"><span class="compact-icon">DL</span><span><b>${esc(d.id)}</b><small>${dateFmt(d.date)} · Výdej na stavbu · ${esc(d.person)}</small></span><button class="text-button" data-action="print-delivery" data-id="${esc(d.id)}">Tisk</button></div>`),...directReceipts.map(receipt=>`<div class="compact-row"><span class="compact-icon">PŘ</span><span><b>${esc(receipt.documentNumber||receipt.id)}</b><small>${dateFmt(receipt.date)} · Přímá dodávka od ${esc(receipt.supplier||receipt.emailFrom||'dodavatele')}</small></span></div>`)].join('');
-    const body = `<div class="detail-summary"><div><span>Číslo zakázky</span><b>${esc(p.id)}</b></div><div><span>Zákazník</span><b>${esc(p.client)}</b></div><div><span>Termín</span><b>${dateFmt(p.due)}</b></div><div><span>Odpovědný</span><b>${esc(p.manager)}</b></div><div><span>Přiřazení pracovníci</span><b>${assignedNames(p).map(esc).join(', ')||'—'}</b></div><div><span>Stav</span>${statusPill(p.status)}</div><div><span>Místo</span><b>${esc(p.address)}</b></div></div><h3 class="modal-subheading">Materiál dodaný na zakázku</h3><div class="table-wrap"><table><thead><tr><th>MATERIÁL</th><th>CELKOVÉ MNOŽSTVÍ</th><th>DODACÍ LISTY</th></tr></thead><tbody>${used||'<tr><td colspan="3" class="empty-cell">Na tuto zakázku zatím nebyl dodán materiál.</td></tr>'}</tbody></table></div><h3 class="modal-subheading">Dodací listy (${docs.length+directReceipts.length})</h3>${docsHtml||'<p class="muted">Zatím žádné doklady.</p>'}`;
+    const body = `<div class="detail-summary"><div><span>Číslo zakázky</span><b>${esc(p.id)}</b></div><div><span>Zákazník</span><b>${esc(p.client)}</b></div><div><span>Termín</span><b>${dateFmt(p.due)}</b></div><div><span>Odpovědný</span><b>${esc(p.manager)}</b></div><div><span>Přiřazení pracovníci</span><b>${assignedNames(p).map(esc).join(', ')||'—'}</b></div><div><span>Stav</span>${statusPill(p.status)}</div><div><span>Místo</span><b>${esc(p.address)}</b></div></div><h3 class="modal-subheading">Hodinové sazby na zakázce</h3>${assignedRateRows||'<p class="muted">K zakázce zatím nejsou přiřazení pracovníci.</p>'}<h3 class="modal-subheading">Materiál dodaný na zakázku</h3><div class="table-wrap"><table><thead><tr><th>MATERIÁL</th><th>CELKOVÉ MNOŽSTVÍ</th><th>DODACÍ LISTY</th></tr></thead><tbody>${used||'<tr><td colspan="3" class="empty-cell">Na tuto zakázku zatím nebyl dodán materiál.</td></tr>'}</tbody></table></div><h3 class="modal-subheading">Dodací listy (${docs.length+directReceipts.length})</h3>${docsHtml||'<p class="muted">Zatím žádné doklady.</p>'}`;
     openModal(`Detail zakázky · ${esc(p.id)}`,body,'','');
     $('.modal-actions', $('#app-modal')).innerHTML = `<button type="button" class="button-quiet" data-action="close-modal">Zavřít</button><button type="button" class="export" data-action="new-delivery-for-project" data-id="${esc(p.id)}">＋ Dodací list</button><button type="button" class="export" data-action="edit-project" data-id="${esc(p.id)}">Upravit zakázku</button>`;
   }
-  function serializeForm(form) { const entries=new FormData(form),data=Object.fromEntries(entries.entries());data.assignedUsers=entries.getAll('assignedUsers');return data; }
+  function serializeForm(form) { const entries=new FormData(form),data=Object.fromEntries(entries.entries());data.assignedUsers=entries.getAll('assignedUsers');data.hourlyRates=Object.fromEntries([...form.querySelectorAll('[data-project-rate]')].filter(input=>data.assignedUsers.includes(input.dataset.userId)).map(input=>[input.dataset.userId,Number(input.value)||0]));return data; }
   function closeModal() { $('#app-modal').close(); }
   function csvDownload(filename, rows) {
     const csv = '\uFEFF' + rows.map(row=>row.map(cell=>`"${String(cell??'').replace(/"/g,'""')}"`).join(';')).join('\r\n');
@@ -488,11 +483,11 @@
       if(page==='users'){
         const pending=rows.map((row,index)=>({row,index})), errors=[];
         for(const {row,index} of pending){
-          const full_name=csvValue(row,'Jméno','Jméno a příjmení','Celé jméno'),email=csvValue(row,'E-mail','Email'),password=csvValue(row,'Heslo','Počáteční heslo'),rawRole=csvValue(row,'Role')||'employee';
+          const full_name=csvValue(row,'Jméno','Jméno a příjmení','Celé jméno'),email=csvValue(row,'E-mail','Email'),phone=csvValue(row,'Telefon','Telefonní číslo'),hourly_rate=Number(csvValue(row,'Hodinová sazba (Kč/h)','Hodinová sazba','Sazba za hodinu')||0),password=csvValue(row,'Heslo','Počáteční heslo'),rawRole=csvValue(row,'Role')||'employee';
           const roleMap={'administrátor':'admin','projektový manažer':'project_manager','vedoucí montáže':'foreman','technik':'technician','administrativa':'office','zaměstnanec':'employee'};
           const role=roleMap[rawRole.toLocaleLowerCase('cs')]||rawRole;
-          if(!full_name||!email||password.length<8){errors.push(`řádek ${index+2}: vyplňte jméno, e-mail a heslo alespoň 8 znaků`);continue;}
-          try{await window.MLAuth.createUser({full_name,email,role,password});}catch(error){errors.push(`řádek ${index+2}: ${error.message}`);}
+          if(!full_name||!email||password.length<8||!Number.isFinite(hourly_rate)||hourly_rate<0){errors.push(`řádek ${index+2}: vyplňte jméno, e-mail, heslo alespoň 8 znaků a platnou hodinovou sazbu`);continue;}
+          try{await window.MLAuth.createUser({full_name,email,phone,hourly_rate,role,password});}catch(error){errors.push(`řádek ${index+2}: ${error.message}`);}
         }
         const remote=await window.MLAuth.adminState();state.users=(remote.users||[]).map(mapDatabaseUser);
         log(`Proběhl import uživatelských účtů z CSV (${rows.length} řádků).`,'Uživatelé');
@@ -512,7 +507,7 @@
       invoices:['ml-work-faktury.csv',[['Faktura','Dodací list','Zakázka ID','Vystaveno','Splatnost','Stav','Částka'],...state.invoices.map(i=>[i.id,i.deliveryId,i.projectId,i.date,i.due,i.status,i.amount])]],
       attendance:['ml-work-dochazka.csv',[['ID','Datum','Pracovník','Zakázka ID','Příchod','Odchod','Poznámka'],...state.attendance.map(a=>[a.id,a.date,a.employee,a.projectId,a.start,a.end,a.note])]],
       requests:['ml-work-zadosti.csv',[['Jméno','E-mail','Role','Datum','Stav'],...state.requests.map(r=>[r.name,r.email,r.role,r.date,r.status])]],
-      users:['ml-work-uzivatele.csv',[['Jméno','E-mail','Role','Stav'],...state.users.map(u=>[u.name,u.email,u.role,u.status])]],
+      users:['ml-work-zamestnanci.csv',[['Jméno','Telefon','E-mail','Role','Hodinová sazba (Kč/h)','Stav'],...state.users.filter(u=>u.role!=='Administrátor').map(u=>[u.name,u.phone,u.email,u.role,u.hourlyRate,u.status])]],
       activity:['ml-work-aktivita.csv',[['Datum','Typ','Událost'],...state.activity.map(a=>[a.date,a.kind,a.text])]]
     };
     const definition=definitions[page];if(definition)csvDownload(definition[0],definition[1]);
@@ -546,24 +541,6 @@
     const subtotal=lines.reduce((sum,item)=>sum+item.qty*item.unitPrice,0),taxRate=Number(state.invoiceTemplate?.vatRate||0),taxAmount=subtotal*taxRate/100;
     const sample={id:'VZOR-2026-001',projectId:p?.id||'VZOR',date:day,due:datePlusDays(day,state.invoiceTemplate?.dueDays||14),items:lines,subtotal,taxRate,taxAmount,amount:subtotal+taxAmount,preview:true};
     const saved=state.invoices;state.invoices=[sample];printInvoice(sample.id);state.invoices=saved;
-  }
-  async function synchronizeIncomingMail(){
-    if(mailStatus.running)return;
-    mailStatus={...mailStatus,running:true};
-    try{
-      const result=await window.MLAuth.syncMail();
-      mailStatus=result;
-      if(!result.configured){notify(result.message||'Doplňte přístup pro poštovní aplikaci v místním nastavení.');return;}
-      const remote=await window.MLAuth.adminState();
-      if(remote.state&&typeof remote.state==='object')state={...demo,...remote.state};
-      state.users=(remote.users||[]).map(mapDatabaseUser);databaseRevision=Number(remote.revision||0);
-      notify(result.imported?`Načteno ${result.imported} dodacích listů ke kontrole.`:'Nebyly nalezeny nové dodací listy.');
-    }catch(error){
-      try{mailStatus=await window.MLAuth.mailStatus();}catch{}
-      notify(error.message||'E-mail se nepodařilo synchronizovat.');
-    }finally{
-      mailStatus.running=false;render();
-    }
   }
   function chooseIncomingFile(){
     if(incomingUploadRunning)return;
@@ -622,7 +599,6 @@
         state.incomingReceipts=state.incomingReceipts.filter(item=>item.id!==recordId);
         log(`Příjmový doklad ${receipt.documentNumber||receipt.id} byl odstraněn${duplicate?' jako duplicitní':''}.`,'Příjem materiálu');render();notify('Příjmový doklad byl odstraněn.');break;
       }
-      case 'mail-sync': synchronizeIncomingMail(); break;
       case 'new-delivery': openDeliveryForm(); break;
       case 'new-stock-delivery': openDeliveryForm(); break;
       case 'edit-delivery': openDeliveryForm('',recordId); break;
@@ -728,7 +704,7 @@
     if(action==='save-user'){
       if(state.users.some(u=>u.email.toLowerCase()===data.email.toLowerCase())){notify('Uživatel s tímto e-mailem již existuje.');return;}
       try{
-        const {user}=await window.MLAuth.createUser({full_name:data.name,email:data.email,role:data.role,password:data.password});
+        const {user}=await window.MLAuth.createUser({full_name:data.name,email:data.email,phone:data.phone,hourly_rate:Number(data.hourlyRate),role:data.role,password:data.password});
         state.users.unshift(mapDatabaseUser(user));
         log(`Byl vytvořen účet ${user.full_name} (${window.MLAuth.displayRole(user)}).`,'Uživatelé');
         closeModal();render();notify('Uživatel byl vytvořen a může se přihlásit.');
@@ -738,7 +714,7 @@
     if(action==='save-user-edit'){
       try{
         const previousUser=state.users.find(item=>item.id===data.recordId),previousName=previousUser?.name||'';
-        const {user}=await window.MLAuth.updateUser(data.recordId,{full_name:data.name,email:data.email,role:data.role});
+        const {user}=await window.MLAuth.updateUser(data.recordId,{full_name:data.name,email:data.email,phone:data.phone,hourly_rate:Number(data.hourlyRate),role:data.role});
         const index=state.users.findIndex(item=>item.id===user.id);if(index>=0)state.users[index]=mapDatabaseUser(user);
         if(previousName&&previousName!==user.full_name){for(const project of state.projects)if(project.manager===previousName)project.manager=user.full_name;for(const attendance of state.attendance)if(attendance.employee===previousName)attendance.employee=user.full_name;}
         log(`Účet ${user.email} byl upraven.`,'Uživatelé');await save();closeModal();render();notify('Uživatelský účet byl upraven.');
@@ -747,8 +723,8 @@
     }
     if(action==='save-project') {
       const assignedUsers=Array.isArray(data.assignedUsers)?data.assignedUsers:[];
-      if(data.recordId){const p=project(data.recordId);Object.assign(p,{name:data.name,client:data.client,address:data.address,manager:data.manager,status:data.status,due:data.due,assignedUsers});log(`Zakázka ${p.id} byla upravena.`,'Zakázky');}
-      else {const p={id:nextNumberId('ML-',state.projects),name:data.name,client:data.client,address:data.address,manager:data.manager,status:data.status,due:data.due,assignedUsers};state.projects.unshift(p);log(`Byla vytvořena zakázka ${p.id} – ${p.name}.`,'Zakázky');}
+      if(data.recordId){const p=project(data.recordId);Object.assign(p,{name:data.name,client:data.client,address:data.address,manager:data.manager,status:data.status,due:data.due,assignedUsers,hourlyRates:data.hourlyRates});log(`Zakázka ${p.id} byla upravena.`,'Zakázky');}
+      else {const p={id:nextNumberId('ML-',state.projects),name:data.name,client:data.client,address:data.address,manager:data.manager,status:data.status,due:data.due,assignedUsers,hourlyRates:data.hourlyRates};state.projects.unshift(p);log(`Byla vytvořena zakázka ${p.id} – ${p.name}.`,'Zakázky');}
     } else if(action==='save-material') {
       const m={id:data.recordId||id('MAT'),name:data.name,category:data.category,unit:data.unit,stock:Number(data.stock),min:Number(data.min),price:Number(data.price),location:data.location};
       if(data.recordId){const old=material(data.recordId),delta=Number(m.stock)-Number(old.stock);Object.assign(old,m);if(delta)state.movements.unshift({id:id('SM'),materialId:m.id,date:day,direction:delta>0?'in':'out',qty:Math.abs(delta),note:'Úprava stavu při editaci materiálu'});log(`Materiál ${m.name} byl upraven.`,'Sklad');}
@@ -824,6 +800,8 @@
     if(event.target.closest('#notification-button')) notify(`${lowStock().length} položek pod minimální zásobou · ${state.invoices.filter(item=>item.status!=='Uhrazeno').length} neuhrazených faktur`);
   });
   document.addEventListener('change',event=>{
+    const projectToggle=event.target.closest('[data-project-toggle]');
+    if(projectToggle){const rateInput=projectToggle.closest('.assignment-member')?.querySelector('[data-project-rate]');if(rateInput)rateInput.disabled=!projectToggle.checked;}
     const materialSelect=event.target.closest('.incoming-item-row select[name="materialId"]');
     if(materialSelect?.value){const item=material(materialSelect.value),row=materialSelect.closest('.incoming-item-row');if(item&&row){row.querySelector('[name="name"]').value=item.name;row.querySelector('[name="category"]').value=item.category;row.querySelector('[name="unit"]').value=item.unit;}}
     const input=event.target.closest('[data-csv-input]');if(input?.files?.[0])importCsvFile(input.dataset.csvInput,input.files[0]);
@@ -843,7 +821,7 @@
         $('#current-user-initials').textContent=userInitials;
         $('#top-user-initials').textContent=userInitials;
       }
-      try{await loadDatabaseState();try{mailStatus=await window.MLAuth.mailStatus();}catch{}render();}
+      try{await loadDatabaseState();render();}
       catch(error){notify(`Data z databáze se nepodařilo načíst: ${error.message}`);}
       window.setInterval(refreshEmployeeRecords,5000);
       document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshEmployeeRecords();});

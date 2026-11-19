@@ -21,8 +21,6 @@
   async function setUserActive(id,is_active){return request(`./api/admin/users/${encodeURIComponent(id)}/active`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_active})});}
   async function deleteUser(id){return request(`./api/admin/users/${encodeURIComponent(id)}`,{method:'DELETE'});}
   async function updateUser(id,user){return request(`./api/admin/users/${encodeURIComponent(id)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(user)});}
-  async function mailStatus(){return request('./api/admin/mail/status');}
-  async function syncMail(){return request('./api/admin/mail/sync',{method:'POST'});}
   async function uploadIncomingFile(file){
     const bytes=new Uint8Array(await file.arrayBuffer());let binary='';
     for(let offset=0;offset<bytes.length;offset+=0x8000)binary+=String.fromCharCode(...bytes.subarray(offset,offset+0x8000));
@@ -39,5 +37,5 @@
     return {allowed:true,user:session.user,profile:{...session.user,role:displayRole(session.user)}};
   }
   async function signOut(){try{await request('./api/auth/logout',{method:'POST'});}finally{location.replace('./login.html');}}
-  window.MLAuth={configured:true,health,signIn,currentSession,employeeSummary,clockAttendance,adminState,saveAdminState,createUser,setUserActive,deleteUser,updateUser,mailStatus,syncMail,uploadIncomingFile,guard,signOut,isAdmin,displayRole};
+  window.MLAuth={configured:true,health,signIn,currentSession,employeeSummary,clockAttendance,adminState,saveAdminState,createUser,setUserActive,deleteUser,updateUser,uploadIncomingFile,guard,signOut,isAdmin,displayRole};
 })();

@@ -14,6 +14,14 @@ database.exec(fs.readFileSync(path.join(__dirname,'schema.sql'),'utf8'));
 const stockMovementColumns=database.prepare('PRAGMA table_info(stock_movements)').all();
 if(!stockMovementColumns.some(column=>column.name==='direction'))
   database.exec("ALTER TABLE stock_movements ADD COLUMN direction TEXT NOT NULL DEFAULT 'in' CHECK (direction IN ('in','out'))");
+const appUserColumns=database.prepare('PRAGMA table_info(app_users)').all();
+if(!appUserColumns.some(column=>column.name==='phone'))
+  database.exec("ALTER TABLE app_users ADD COLUMN phone TEXT NOT NULL DEFAULT ''");
+if(!appUserColumns.some(column=>column.name==='hourly_rate'))
+  database.exec('ALTER TABLE app_users ADD COLUMN hourly_rate REAL NOT NULL DEFAULT 0 CHECK (hourly_rate >= 0)');
+const projectAssignmentColumns=database.prepare('PRAGMA table_info(project_assignments)').all();
+if(!projectAssignmentColumns.some(column=>column.name==='hourly_rate'))
+  database.exec('ALTER TABLE project_assignments ADD COLUMN hourly_rate REAL NOT NULL DEFAULT 0 CHECK (hourly_rate >= 0)');
 
 function normalizeParameter(value){
   if(value instanceof Date)return value.getTime();

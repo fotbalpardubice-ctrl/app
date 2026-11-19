@@ -6,8 +6,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const {promisify} = require('node:util');
-const {ImapFlow}=require('imapflow');
-const {simpleParser}=require('mailparser');
 
 const scrypt = promisify(crypto.scrypt);
 const root = __dirname;
@@ -31,8 +29,6 @@ const port = Number(process.env.PORT || 4173);
 const {database,query:dbQuery,close:closeDatabase}=require('./database/connection');
 const attempts = new Map();
 const incomingFilesPath=path.join(root,'.data','incoming-receipts');
-const mailStatus={lastSyncAt:null,lastError:'',lastImported:0,running:false};
-let mailSyncPromise=null;
 const defaultInvoiceTemplate={company:'ML Work',address:'',ico:'',dic:'',bankAccount:'',dueDays:14,vatRate:0,footer:'Děkujeme za spolupráci.'};
 const publicFiles = new Set([
   'login.html','login.js','auth-client.js','auth-pages.css',
@@ -104,7 +100,7 @@ async function sessionUser(req){
 }
 function safeUser(user){return {id:user.id,email:user.email,full_name:user.full_name,role:user.role};}
 const userRoles=new Set(['project_manager','foreman','technician','office','employee']);
-function adminUserView(user){return {id:user.id,email:user.email,full_name:user.full_name,role:user.role,is_active:user.is_active};}
+function adminUserView(user){return {id:user.id,email:user.email,full_name:user.full_name,role:user.role,is_active:user.is_active,phone:user.phone||'',hourly_rate:Number(user.hourly_rate)||0};}
 async function requireAdmin(req,res){
   const user=await sessionUser(req);
   if(!user){json(res,401,{error:'Přihlášení vypršelo. Přihlaste se znovu.'});return null;}
@@ -126,7 +122,7 @@ function writeBusinessTables(state,actorId){
   const deleteTables=['activity_log','invoices','attendance','supplier_receipt_items','supplier_receipts','delivery_items','delivery_notes','stock_movements','project_assignments','access_requests','projects','materials','clients'];
   for(const table of deleteTables)database.prepare(`DELETE FROM ${table}`).run();
 
-  const users=database.prepare('SELECT id,full_name,email FROM app_users').all();
+  const users=database.prepare('SELECT id,full_name,email,hourly_rate FROM app_users').all();
   const userByName=new Map(users.map(user=>[user.full_name.trim().toLocaleLowerCase('cs'),user.id]));
   const clients=new Map();
   for(const item of state.projects){
@@ -149,10 +145,12 @@ function writeBusinessTables(state,actorId){
       safeText(item.address),userByName.get(manager.trim().toLocaleLowerCase('cs'))||null,manager,status,item.due||null);
   }
   const validUserIds=new Set(users.map(user=>user.id));
-  const insertAssignment=database.prepare('INSERT OR IGNORE INTO project_assignments(project_id,user_id,assigned_by) VALUES(?,?,?)');
+  const userById=new Map(users.map(user=>[user.id,user]));
+  const insertAssignment=database.prepare('INSERT OR IGNORE INTO project_assignments(project_id,user_id,hourly_rate,assigned_by) VALUES(?,?,?,?)');
   for(const item of state.projects){
+    const projectRates=item.hourlyRates&&typeof item.hourlyRates==='object'?item.hourlyRates:{};
     for(const userId of Array.isArray(item.assignedUsers)?new Set(item.assignedUsers):[])
-      if(validUserIds.has(userId))insertAssignment.run(safeText(item.id),userId,actorId);
+      if(validUserIds.has(userId))insertAssignment.run(safeText(item.id),userId,Math.max(0,safeNumber(projectRates[userId],safeNumber(userById.get(userId)?.hourly_rate))),actorId);
   }
   const insertMaterial=database.prepare(`INSERT INTO materials(id,name,category,unit,stock,minimum_stock,unit_price,location)
     VALUES(?,?,?,?,?,?,?,?)`);
@@ -272,7 +270,7 @@ async function handleAdminState(req,res){
   if(req.method==='GET'){
     const [stateResult,usersResult]=await Promise.all([
       dbQuery("SELECT payload,revision FROM app_state WHERE state_key='main'"),
-      dbQuery('SELECT id,email,full_name,role,is_active FROM app_users ORDER BY created_at,id')
+      dbQuery('SELECT id,email,full_name,role,is_active,phone,hourly_rate FROM app_users ORDER BY created_at,id')
     ]);
     const row=stateResult.rows[0];
     let storedState=null;
@@ -319,18 +317,6 @@ async function cleanupDeletedIncomingFiles(previousState,nextState){
   for(const filename of new Set(names(previousState)))if(!retained.has(filename)&&/^[0-9a-f-]{36}\.(pdf|csv|xlsx|xls|png|jpg|jpeg)$/i.test(filename)){
     try{await fs.promises.rm(path.join(incomingFilesPath,filename),{force:true});}catch{}
   }
-}
-function mailConfiguration(){
-  return {host:process.env.MAIL_IMAP_HOST||'imap.seznam.cz',port:Number(process.env.MAIL_IMAP_PORT||993),user:process.env.MAIL_IMAP_USER||'pmagusin@seznam.cz',password:process.env.MAIL_IMAP_PASSWORD||'',folder:process.env.MAIL_IMAP_FOLDER||'INBOX'};
-}
-function mailStatusView(){
-  const config=mailConfiguration();
-  return {configured:Boolean(config.user&&config.password),user:config.user,host:config.host,port:config.port,folder:config.folder,lastSyncAt:mailStatus.lastSyncAt,lastError:mailStatus.lastError,lastImported:mailStatus.lastImported,running:mailStatus.running,pollIntervalMinutes:2};
-}
-function mailTextKey(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('cs');}
-function isDeliveryMail(parsed){
-  const names=(parsed.attachments||[]).map(item=>item.filename||'').join(' ');
-  return /(dodaci\s*list|dodavka|delivery\s*note)/i.test(mailTextKey(`${parsed.subject||''} ${parsed.text||''} ${names}`));
 }
 function incomingFileType(filename){
   const extension=path.extname(filename).toLowerCase();
@@ -437,28 +423,6 @@ async function extractPdfText(buffer){
     return lines.join('\n').slice(0,12000);
   }finally{try{await (pdf?pdf.destroy():loadingTask.destroy());}catch{}}
 }
-function persistIncomingReceipt(receipt,activityText){
-  database.exec('BEGIN IMMEDIATE');
-  try{
-    const saved=database.prepare("SELECT payload,revision FROM app_state WHERE state_key='main'").get();
-    if(!saved?.payload){database.exec('ROLLBACK');return false;}
-    const state=JSON.parse(saved.payload);
-    for(const key of ['projects','materials','deliveries','invoices','attendance','requests','activity','movements','incomingReceipts'])if(!Array.isArray(state[key]))state[key]=[];
-    if(receipt.sourceKey&&state.incomingReceipts.some(item=>item.sourceKey===receipt.sourceKey)){database.exec('ROLLBACK');return false;}
-    receipt.duplicateOf=receiptDuplicateOf(state.incomingReceipts,receipt)||receipt.duplicateOf||'';
-    state.incomingReceipts.unshift(receipt);
-    state.activity.unshift({date:receipt.date,text:activityText||`Nový dodací list z e-mailu od ${receipt.emailFrom||'neznámého odesílatele'} čeká na kontrolu.`,'kind':'Příjem materiálu'});
-    state.activity=state.activity.slice(0,80);
-    writeBusinessTables(state,null);
-    const revision=Number(saved.revision||0)+1;
-    database.prepare("UPDATE app_state SET payload=?,revision=?,updated_by=NULL,updated_at=(CAST(strftime('%s','now') AS INTEGER)*1000) WHERE state_key='main'").run(JSON.stringify(state),revision);
-    database.exec('COMMIT');
-    return true;
-  }catch(error){
-    try{database.exec('ROLLBACK');}catch{}
-    throw error;
-  }
-}
 function receiptDuplicateOf(receipts,candidate){
   const hashes=new Set([candidate.fileHash,...(candidate.attachments||[]).map(item=>item.sha256)].filter(Boolean));
   const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -470,78 +434,6 @@ function receiptDuplicateOf(receipts,candidate){
     const sameDocument=Boolean(supplier&&documentNumber&&normalize(item.supplier)===supplier&&normalize(item.documentNumber)===documentNumber);
     return hashMatch||sameDocument;
   })?.id||'';
-}
-function persistEmailReceipt(receipt){
-  return persistIncomingReceipt(receipt,`Nový dodací list z e-mailu od ${receipt.emailFrom||'neznámého odesílatele'} čeká na kontrolu.`);
-}
-async function syncIncomingMailbox(){
-  if(mailSyncPromise)return mailSyncPromise;
-  const config=mailConfiguration();
-  if(!config.password){mailStatus.lastError='V .env zatím není nastavené heslo pro poštovní aplikaci.';return {imported:0,configured:false};}
-  mailSyncPromise=(async()=>{
-    const client=new ImapFlow({host:config.host,port:config.port,secure:true,auth:{user:config.user,pass:config.password},logger:false,connectionTimeout:20000,socketTimeout:30000});
-    let lock=null,imported=0;
-    mailStatus.running=true;mailStatus.lastError='';
-    try{
-      await client.connect();
-      lock=await client.getMailboxLock(config.folder);
-      const unseen=await client.search({seen:false},{uid:true});
-      if(Array.isArray(unseen))for(const uid of unseen){
-        const meta=await client.fetchOne(uid,{envelope:true,size:true,internalDate:true},{uid:true});
-        if(!meta||meta.size>25*1024*1024)continue;
-        const message=await client.fetchOne(uid,{source:true,envelope:true,size:true,internalDate:true},{uid:true});
-        if(!message?.source)continue;
-        const parsed=await simpleParser(message.source);
-        const hasDocumentAttachment=(parsed.attachments||[]).some(attachment=>incomingFileType(attachment.filename||'')&&attachment.content?.length&&attachment.content.length<=12*1024*1024);
-        if(!isDeliveryMail(parsed)&&!hasDocumentAttachment)continue;
-        const uidValidity=String(client.mailbox?.uidValidity||'');
-        const sourceKey=`${config.folder}:${uidValidity}:${uid}`;
-        const attachments=[];
-        await fs.promises.mkdir(incomingFilesPath,{recursive:true});
-        for(const attachment of parsed.attachments||[]){
-          const originalName=path.basename(String(attachment.filename||'priloha'));
-          const type=incomingFileType(originalName);
-          if(!type||!attachment.content?.length||attachment.content.length>12*1024*1024)continue;
-          const id=crypto.randomUUID(),storageName=`${id}${type.extension}`;
-          await fs.promises.writeFile(path.join(incomingFilesPath,storageName),attachment.content,{flag:'wx'});
-          attachments.push({id,name:originalName,type:type.mime,size:attachment.content.length,storageName,sha256:crypto.createHash('sha256').update(attachment.content).digest('hex')});
-        }
-        if(!attachments.length&&!parsed.subject&&!parsed.text)continue;
-        const sender=parsed.from?.text||message.envelope?.from?.map(item=>item.name?`${item.name} <${item.address}>`:item.address).join(', ')||'';
-        const messageDate=parsed.date instanceof Date&&!Number.isNaN(parsed.date.valueOf())?parsed.date:(message.internalDate instanceof Date?message.internalDate:new Date());
-        const receipt={id:`RC-${crypto.randomUUID()}`,source:'email',sourceKey,emailMessageId:parsed.messageId||message.envelope?.messageId||'',emailFrom:sender,emailSubject:parsed.subject||'(bez předmětu)',emailDate:messageDate.toISOString(),date:messageDate.toISOString().slice(0,10),supplier:parsed.from?.value?.[0]?.name||'',documentNumber:'',destination:'pending',projectId:'',status:'Čeká na kontrolu',note:'',attachments,items:[]};
-        if(persistEmailReceipt(receipt)){
-          imported++;
-          await client.messageFlagsAdd(uid,['\\Seen'],{uid:true});
-        }else{
-          for(const attachment of attachments)await fs.promises.rm(path.join(incomingFilesPath,attachment.storageName),{force:true});
-        }
-      }
-      mailStatus.lastSyncAt=new Date().toISOString();mailStatus.lastImported=imported;mailStatus.lastError='';
-      return {imported,configured:true};
-    }catch(error){
-      mailStatus.lastSyncAt=new Date().toISOString();mailStatus.lastImported=imported;mailStatus.lastError=String(error.message||'Připojení k poště selhalo.').slice(0,240);
-      console.error('Synchronizace e-mailové schránky selhala:',mailStatus.lastError);
-      return {imported,configured:true,error:mailStatus.lastError};
-    }finally{
-      lock?.release();
-      try{await client.logout();}catch{}
-      mailStatus.running=false;
-    }
-  })().finally(()=>{mailSyncPromise=null;});
-  return mailSyncPromise;
-}
-async function handleMailStatus(req,res){
-  const user=await requireAdmin(req,res);if(!user)return;
-  return json(res,200,mailStatusView());
-}
-async function handleMailSync(req,res){
-  if(!originAllowed(req))return json(res,403,{error:'Požadavek byl odmítnut.'});
-  const user=await requireAdmin(req,res);if(!user)return;
-  const result=await syncIncomingMailbox();
-  if(!result.configured)return json(res,200,{...mailStatusView(),message:'Doplňte heslo pro poštovní aplikaci do místního souboru .env.'});
-  if(result.error)return json(res,502,{...mailStatusView(),error:'Poštu se nepodařilo synchronizovat. Zkontrolujte připojení a heslo pro poštovní aplikaci.'});
-  return json(res,200,{...mailStatusView(),imported:result.imported});
 }
 async function handleIncomingAttachment(req,res,receiptId,attachmentId){
   const user=await requireAdmin(req,res);if(!user)return;
@@ -659,14 +551,15 @@ async function handleCreateUser(req,res){
   const actor=await requireAdmin(req,res);if(!actor)return;
   let input;try{input=await bodyJson(req);}catch(error){return json(res,error.status||400,{error:error.message});}
   const fullName=String(input.full_name||'').trim(),email=String(input.email||'').trim().toLowerCase();
+  const phone=String(input.phone||'').trim(),hourlyRate=Number(input.hourly_rate??0);
   const password=String(input.password||''),role=String(input.role||'employee');
-  if(fullName.length<2||fullName.length>120||!/^\S+@\S+\.\S+$/.test(email)||email.length>254||!userRoles.has(role)||password.length<8||password.length>1024)
-    return json(res,400,{error:'Zkontrolujte jméno, e-mail, roli a heslo dlouhé alespoň 8 znaků.'});
+  if(fullName.length<2||fullName.length>120||!/^\S+@\S+\.\S+$/.test(email)||email.length>254||phone.length>40||!Number.isFinite(hourlyRate)||hourlyRate<0||hourlyRate>10000000||!userRoles.has(role)||password.length<8||password.length>1024)
+    return json(res,400,{error:'Zkontrolujte jméno, telefon, e-mail, hodinovou sazbu a heslo dlouhé alespoň 8 znaků.'});
   const salt=crypto.randomBytes(16),derived=await scrypt(password,salt,64,{N:32768,r:8,p:1,maxmem:64*1024*1024});
   const passwordHash=`scrypt$${salt.toString('hex')}$${Buffer.from(derived).toString('hex')}`;
   try{
-    const {rows}=await dbQuery(`INSERT INTO app_users(id,email,full_name,role,password_hash,is_active)
-      VALUES($1,$2,$3,$4,$5,1) RETURNING id,email,full_name,role,is_active`,[crypto.randomUUID(),email,fullName,role,passwordHash]);
+    const {rows}=await dbQuery(`INSERT INTO app_users(id,email,full_name,role,password_hash,phone,hourly_rate,is_active)
+      VALUES($1,$2,$3,$4,$5,$6,$7,1) RETURNING id,email,full_name,role,is_active,phone,hourly_rate`,[crypto.randomUUID(),email,fullName,role,passwordHash,phone,hourlyRate]);
     return json(res,201,{user:adminUserView(rows[0])});
   }catch(error){if(String(error.message).includes('UNIQUE constraint failed'))return json(res,409,{error:'Uživatel s tímto e-mailem už existuje.'});throw error;}
 }
@@ -676,7 +569,7 @@ async function handleUserActive(req,res,userId){
   let input;try{input=await bodyJson(req);}catch(error){return json(res,error.status||400,{error:error.message});}
   if(typeof input.is_active!=='boolean')return json(res,400,{error:'Chybí platný stav účtu.'});
   if(userId===actor.id&&!input.is_active)return json(res,400,{error:'Svůj vlastní účet nemůžete pozastavit.'});
-  const {rows}=await dbQuery("UPDATE app_users SET is_active=$2,updated_at=(CAST(strftime('%s','now') AS INTEGER)*1000) WHERE id=$1 RETURNING id,email,full_name,role,is_active",[userId,input.is_active]);
+  const {rows}=await dbQuery("UPDATE app_users SET is_active=$2,updated_at=(CAST(strftime('%s','now') AS INTEGER)*1000) WHERE id=$1 RETURNING id,email,full_name,role,is_active,phone,hourly_rate",[userId,input.is_active]);
   if(!rows.length)return json(res,404,{error:'Uživatel nebyl nalezen.'});
   return json(res,200,{user:adminUserView(rows[0])});
 }
@@ -695,14 +588,15 @@ async function handleUpdateUser(req,res,userId){
   const actor=await requireAdmin(req,res);if(!actor)return;
   let input;try{input=await bodyJson(req);}catch(error){return json(res,error.status||400,{error:error.message});}
   const fullName=String(input.full_name||'').trim(),email=String(input.email||'').trim().toLowerCase(),role=String(input.role||'');
-  if(fullName.length<2||fullName.length>120||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254||!userRoles.has(role))
-    return json(res,400,{error:'Zkontrolujte jméno, e-mail a roli uživatele.'});
+  const phone=String(input.phone||'').trim(),hourlyRate=Number(input.hourly_rate??0);
+  if(fullName.length<2||fullName.length>120||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254||phone.length>40||!Number.isFinite(hourlyRate)||hourlyRate<0||hourlyRate>10000000||!userRoles.has(role))
+    return json(res,400,{error:'Zkontrolujte jméno, telefon, e-mail, hodinovou sazbu a roli uživatele.'});
   const existing=await dbQuery('SELECT id,role FROM app_users WHERE id=$1',[userId]);
   if(!existing.rows.length)return json(res,404,{error:'Uživatel nebyl nalezen.'});
   if(existing.rows[0].role==='admin')return json(res,400,{error:'Účet správce zde nelze upravit.'});
   try{
-    const {rows}=await dbQuery(`UPDATE app_users SET email=$2,full_name=$3,role=$4,updated_at=(CAST(strftime('%s','now') AS INTEGER)*1000)
-      WHERE id=$1 RETURNING id,email,full_name,role,is_active`,[userId,email,fullName,role]);
+    const {rows}=await dbQuery(`UPDATE app_users SET email=$2,full_name=$3,role=$4,phone=$5,hourly_rate=$6,updated_at=(CAST(strftime('%s','now') AS INTEGER)*1000)
+      WHERE id=$1 RETURNING id,email,full_name,role,is_active,phone,hourly_rate`,[userId,email,fullName,role,phone,hourlyRate]);
     return json(res,200,{user:adminUserView(rows[0])});
   }catch(error){if(String(error.message).includes('UNIQUE constraint failed'))return json(res,409,{error:'Uživatel s tímto e-mailem už existuje.'});throw error;}
 }
@@ -772,8 +666,6 @@ async function handler(req,res){
     if(pathname==='/api/auth/session'&&req.method==='GET')return await handleSession(req,res);
     if(pathname==='/api/auth/logout'&&req.method==='POST')return await handleLogout(req,res);
     if(pathname==='/api/admin/state'&&(req.method==='GET'||req.method==='PUT'))return await handleAdminState(req,res);
-    if(pathname==='/api/admin/mail/status'&&req.method==='GET')return await handleMailStatus(req,res);
-    if(pathname==='/api/admin/mail/sync'&&req.method==='POST')return await handleMailSync(req,res);
     if(pathname==='/api/admin/incoming/upload'&&req.method==='POST')return await handleIncomingUpload(req,res);
     const incomingAttachmentMatch=pathname.match(/^\/api\/admin\/incoming\/([A-Za-z0-9-]+)\/attachments\/([A-Za-z0-9-]+)$/);
     if(incomingAttachmentMatch&&req.method==='GET')return await handleIncomingAttachment(req,res,incomingAttachmentMatch[1],incomingAttachmentMatch[2]);
@@ -805,17 +697,11 @@ if(httpsPfxPath&&!process.env.HTTPS_PFX_PASSPHRASE)throw new Error('HTTPS_PFX_PA
 const server=httpsPfxPath
   ?https.createServer({pfx:fs.readFileSync(httpsPfxPath),passphrase:process.env.HTTPS_PFX_PASSPHRASE},requestHandler)
   :http.createServer(requestHandler);
-let mailPollTimer=null,firstMailPollTimer=null;
 server.listen(port,()=>{
   const protocol=server instanceof https.Server?'https':'http';
   console.log(`ML Work běží na ${process.env.PUBLIC_ORIGIN||`${protocol}://localhost:${port}`}`);
   console.log(`SQLite databáze: ${require('./database/connection').databasePath}`);
-  if(mailConfiguration().password){
-    firstMailPollTimer=setTimeout(()=>syncIncomingMailbox(),8000);firstMailPollTimer.unref();
-    mailPollTimer=setInterval(()=>syncIncomingMailbox(),120000);mailPollTimer.unref();
-    console.log(`Automatická kontrola schránky ${mailConfiguration().user} je připravena.`);
-  }
 });
-server.on('close',()=>{clearInterval(mailPollTimer);clearTimeout(firstMailPollTimer);closeDatabase();});
+server.on('close',()=>{closeDatabase();});
 process.on('SIGINT',()=>server.close(()=>process.exit(0)));
 process.on('SIGTERM',()=>server.close(()=>process.exit(0)));

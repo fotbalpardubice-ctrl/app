@@ -12,8 +12,6 @@
     "db:create-admin": "node scripts/create-admin.js"
   },
   "dependencies": {
-    "imapflow": "^2.12.1",
-    "mailparser": "^3.14.5",
     "pdfjs-dist": "^6.5.438"
   }
 }
