@@ -728,8 +728,9 @@
       try{
         const {user}=await window.MLAuth.createUser({full_name:data.name,email:data.email,phone:data.phone,hourly_rate:Number(data.hourlyRate),role:data.role,password:data.password});
         state.users.unshift(mapDatabaseUser(user));
-        const saved=await log(`Byl vytvořen účet ${user.full_name} (${window.MLAuth.displayRole(user)}).`,'Uživatelé');
-        closeModal();render();notify(saved?'Zaměstnanec byl uložen a může se přihlásit.':'Účet zaměstnance je uložen. Provozní záznam se nepodařilo uložit.');
+        const activitySave=log(`Byl vytvořen účet ${user.full_name} (${window.MLAuth.displayRole(user)}).`,'Uživatelé');
+        closeModal();render();notify('Zaměstnanec byl uložen a může se přihlásit.');
+        void activitySave;
       }catch(error){notify(error.message||'Uživatele se nepodařilo vytvořit.');}
       return;
     }
@@ -739,7 +740,8 @@
         const {user}=await window.MLAuth.updateUser(data.recordId,{full_name:data.name,email:data.email,phone:data.phone,hourly_rate:Number(data.hourlyRate),role:data.role});
         const index=state.users.findIndex(item=>item.id===user.id);if(index>=0)state.users[index]=mapDatabaseUser(user);
         if(previousName&&previousName!==user.full_name){for(const project of state.projects)if(project.manager===previousName)project.manager=user.full_name;for(const attendance of state.attendance)if(attendance.employee===previousName)attendance.employee=user.full_name;}
-        const saved=await log(`Účet ${user.email} byl upraven.`,'Uživatelé');closeModal();render();notify(saved?'Údaje zaměstnance byly uloženy.':'Údaje zaměstnance jsou uložené. Provozní záznam se nepodařilo uložit.');
+        const activitySave=log(`Účet ${user.email} byl upraven.`,'Uživatelé');closeModal();render();
+        const saved=await activitySave;notify(saved?'Údaje zaměstnance byly uloženy.':'Účet zaměstnance je uložen. Provozní záznam se nepodařilo uložit.');
       }catch(error){notify(error.message||'Uživatele se nepodařilo upravit.');}
       return;
     }
